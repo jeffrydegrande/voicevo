@@ -28,7 +28,7 @@ pub enum Command {
         exercise: Option<String>,
     },
 
-    /// Analyze recorded sessions (Phase 2)
+    /// Analyze recorded sessions
     Analyze {
         /// Date of the session to analyze
         #[arg(long)]
@@ -39,7 +39,7 @@ pub enum Command {
         all: bool,
     },
 
-    /// Generate trend reports (Phase 4)
+    /// Generate trend reports
     Report {
         /// Number of recent sessions to include
         #[arg(long)]
@@ -50,7 +50,7 @@ pub enum Command {
         all: bool,
     },
 
-    /// Compare two sessions side by side (Phase 4)
+    /// Compare two sessions side by side
     Compare {
         /// Baseline session date
         #[arg(long)]
@@ -61,7 +61,7 @@ pub enum Command {
         current: String,
     },
 
-    /// List all recorded sessions (Phase 3)
+    /// List all recorded sessions
     Sessions,
 }
 

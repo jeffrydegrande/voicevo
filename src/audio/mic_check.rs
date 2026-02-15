@@ -9,9 +9,15 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::util;
 
+use super::recorder;
+
 const CAPTURE_SECONDS: u64 = 2;
 
 /// Run a quick 2-second mic check: capture audio and report peak/RMS levels.
+///
+/// Waits for the user to press Enter before capturing, so they know exactly
+/// when the mic is live. Shows the device name prominently so there's no
+/// ambiguity about which input is being used.
 pub fn run() -> Result<()> {
     let host = cpal::default_host();
     let device = host
@@ -19,8 +25,6 @@ pub fn run() -> Result<()> {
         .context("No default input device found")?;
 
     let device_name = device.name().unwrap_or_else(|_| "<unknown>".into());
-    println!("Device: {}", style(&device_name).bold());
-
     let config = device
         .default_input_config()
         .context("Failed to get default input config")?;
@@ -28,7 +32,20 @@ pub fn run() -> Result<()> {
     let sample_rate = config.sample_rate().0;
     let channels = config.channels() as usize;
     let format = config.sample_format();
-    println!("Config: {channels}ch, {sample_rate} Hz, {format:?}");
+
+    println!(
+        "  Device:  {}",
+        style(&device_name).cyan().bold()
+    );
+    println!("  Config:  {channels}ch, {sample_rate} Hz, {format:?}");
+    println!();
+    println!(
+        "  Press {} to capture a 2-second sample.",
+        style("Enter").green().bold()
+    );
+
+    recorder::wait_for_enter()?;
+
     println!();
 
     // Channel to send captured samples from audio thread to main thread
@@ -73,7 +90,7 @@ pub fn run() -> Result<()> {
     // Show progress bar during capture
     let pb = ProgressBar::new(CAPTURE_SECONDS * 10);
     pb.set_style(
-        ProgressStyle::with_template("  Capturing {bar:30.green/dim} {elapsed_precise}")
+        ProgressStyle::with_template("  Listening {bar:30.green/dim} {elapsed_precise}")
             .unwrap(),
     );
 
@@ -118,9 +135,8 @@ pub fn run() -> Result<()> {
     let peak = util::peak_db(&mono);
     let rms = util::rms_db(&mono);
 
-    println!("  Samples captured: {}", mono.len());
-    println!("  Peak level:       {peak:.1} dB");
-    println!("  RMS level:        {rms:.1} dB");
+    println!("  Peak level:  {peak:.1} dB");
+    println!("  RMS level:   {rms:.1} dB");
     println!();
 
     if peak < -60.0 {

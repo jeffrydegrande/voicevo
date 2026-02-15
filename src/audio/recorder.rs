@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -86,7 +85,7 @@ pub fn record_exercise(exercise: &str, date: &NaiveDate) -> Result<()> {
 ///     → sends f32 sample chunks via mpsc channel
 ///       → writer thread receives chunks and writes to WAV file via hound
 ///   AtomicBool stop signal ← main thread (crossterm Enter keypress)
-fn record_to_file(path: &PathBuf) -> Result<RecordingStats> {
+pub fn record_to_file(path: &std::path::Path) -> Result<RecordingStats> {
     let host = cpal::default_host();
     let device = host
         .default_input_device()
@@ -153,7 +152,7 @@ fn record_to_file(path: &PathBuf) -> Result<RecordingStats> {
     stream.play().context("Failed to start audio stream")?;
 
     // Writer thread: receives mono f32 chunks and writes 16-bit WAV
-    let wav_path = path.clone();
+    let wav_path = path.to_path_buf();
     let writer_handle = thread::spawn(move || -> Result<Vec<f32>> {
         let spec = wav::recording_spec(sample_rate);
         let mut writer = wav::create_writer(&wav_path, spec)?;
@@ -203,7 +202,7 @@ fn record_to_file(path: &PathBuf) -> Result<RecordingStats> {
 }
 
 /// Block until the user presses Enter, using crossterm raw mode.
-fn wait_for_enter() -> Result<()> {
+pub fn wait_for_enter() -> Result<()> {
     crossterm::terminal::enable_raw_mode()?;
 
     loop {
