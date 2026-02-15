@@ -1,0 +1,15 @@
+[package]
+name = "voice-tracker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+chrono = "0.4"
+clap = { version = "4", features = ["derive"] }
+console = "0.15"
+cpal = "0.15"
+crossterm = "0.28"
+hound = "3.5"
+indicatif = "0.17"
+rodio = { version = "0.20", default-features = false, features = ["wav"] }

@@ -1,0 +1,6 @@
+/target
+/data
+
+
+# claude
+.claude/settings.local.json
