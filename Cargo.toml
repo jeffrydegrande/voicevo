@@ -8,6 +8,7 @@ anyhow = "1"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 console = "0.15"
+dirs = "6"
 cpal = "0.15"
 crossterm = "0.28"
 hound = "3.5"

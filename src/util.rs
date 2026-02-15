@@ -2,12 +2,10 @@ use std::path::PathBuf;
 
 use chrono::NaiveDate;
 
-/// Build the path for a recording: data/recordings/YYYY-MM-DD/{exercise}.wav
+/// Build the XDG-compliant path for a recording.
+/// Delegates to `paths::recording_path` for consistent directory resolution.
 pub fn recording_path(date: &NaiveDate, exercise: &str) -> PathBuf {
-    PathBuf::from("data")
-        .join("recordings")
-        .join(date.to_string())
-        .join(format!("{exercise}.wav"))
+    crate::paths::recording_path(date, exercise)
 }
 
 /// Resolve a date string to a NaiveDate, defaulting to today.
@@ -104,10 +102,8 @@ mod tests {
     fn recording_path_format() {
         let date = NaiveDate::from_ymd_opt(2026, 2, 8).unwrap();
         let path = recording_path(&date, "sustained");
-        assert_eq!(
-            path,
-            PathBuf::from("data/recordings/2026-02-08/sustained.wav")
-        );
+        // XDG-compliant: ends with the expected structure
+        assert!(path.ends_with("recordings/2026-02-08/sustained.wav"));
     }
 
     #[test]

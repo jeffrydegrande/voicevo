@@ -3,11 +3,10 @@ mod audio;
 mod cli;
 mod config;
 mod dsp;
+mod paths;
 mod report;
 mod storage;
 mod util;
-
-use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
@@ -134,7 +133,8 @@ fn main() -> Result<()> {
             }
 
             // Generate chart PNG
-            let chart_path = PathBuf::from("reports")
+            let reports = paths::reports_dir();
+            let chart_path = reports
                 .join(format!("report_{}.png", chrono::Local::now().format("%Y-%m-%d")));
             report::charts::generate_trend_chart(&sessions, &chart_path)?;
             println!(
@@ -144,9 +144,9 @@ fn main() -> Result<()> {
 
             // Generate markdown report
             let md = report::markdown::generate_report(&sessions, &app_config)?;
-            let md_path = PathBuf::from("reports")
+            let md_path = reports
                 .join(format!("report_{}.md", chrono::Local::now().format("%Y-%m-%d")));
-            std::fs::create_dir_all("reports")?;
+            std::fs::create_dir_all(&reports)?;
             std::fs::write(&md_path, &md)?;
             println!(
                 "Report saved to {}",
@@ -159,12 +159,23 @@ fn main() -> Result<()> {
         Command::Compare { baseline, current } => {
             report::compare::compare_sessions(&baseline, &current)
         }
+
+        Command::Paths => {
+            println!("{}", style("voice-tracker paths").bold());
+            println!();
+            println!("  Config:     {}", style(paths::config_dir().display()).cyan());
+            println!("  Data:       {}", style(paths::data_dir().display()).cyan());
+            println!("  Recordings: {}", style(paths::recordings_dir().display()).cyan());
+            println!("  Sessions:   {}", style(paths::sessions_dir().display()).cyan());
+            println!("  Reports:    {}", style(paths::reports_dir().display()).cyan());
+            Ok(())
+        }
     }
 }
 
 /// Find all dates that have recording directories.
 fn find_recording_dates() -> Result<Vec<String>> {
-    let dir = PathBuf::from("data").join("recordings");
+    let dir = paths::recordings_dir();
     if !dir.exists() {
         return Ok(Vec::new());
     }

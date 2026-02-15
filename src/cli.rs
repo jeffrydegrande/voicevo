@@ -63,6 +63,9 @@ pub enum Command {
 
     /// List all recorded sessions
     Sessions,
+
+    /// Show where data and config files are stored
+    Paths,
 }
 
 #[derive(Subcommand)]

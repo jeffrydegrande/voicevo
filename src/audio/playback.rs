@@ -89,10 +89,7 @@ mod tests {
     #[test]
     fn resolve_date_with_exercise() {
         let path = resolve_play_path("2026-02-08", Some("sustained")).unwrap();
-        assert_eq!(
-            path,
-            PathBuf::from("data/recordings/2026-02-08/sustained.wav")
-        );
+        assert!(path.ends_with("recordings/2026-02-08/sustained.wav"));
     }
 
     #[test]

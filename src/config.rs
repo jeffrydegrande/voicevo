@@ -1,9 +1,8 @@
-use std::path::Path;
-
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::dsp::pitch::PitchConfig;
+use crate::paths;
 
 /// Application configuration, loaded from data/config.toml.
 ///
@@ -131,28 +130,26 @@ impl From<&AnalysisConfig> for PitchConfig {
     }
 }
 
-const CONFIG_PATH: &str = "data/config.toml";
-
-/// Load the application config from data/config.toml.
+/// Load the application config from $XDG_CONFIG_HOME/voice-tracker/config.toml.
 /// If the file doesn't exist, returns defaults.
 pub fn load_config() -> Result<AppConfig> {
-    let path = Path::new(CONFIG_PATH);
+    let path = paths::config_file();
 
     if !path.exists() {
         return Ok(AppConfig::default());
     }
 
-    let contents = std::fs::read_to_string(path)
+    let contents = std::fs::read_to_string(&path)
         .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
     toml::from_str(&contents)
         .with_context(|| format!("Failed to parse config file: {}", path.display()))
 }
 
-/// Write the default config to data/config.toml if it doesn't exist.
+/// Write the default config if it doesn't exist.
 /// Useful for first-time setup so users can see what's configurable.
 pub fn write_default_config_if_missing() -> Result<()> {
-    let path = Path::new(CONFIG_PATH);
+    let path = paths::config_file();
 
     if path.exists() {
         return Ok(());
@@ -166,7 +163,7 @@ pub fn write_default_config_if_missing() -> Result<()> {
     let toml_str = toml::to_string_pretty(&default)
         .context("Failed to serialize default config")?;
 
-    std::fs::write(path, toml_str)
+    std::fs::write(&path, toml_str)
         .with_context(|| format!("Failed to write config file: {}", path.display()))?;
 
     Ok(())

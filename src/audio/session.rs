@@ -3,6 +3,7 @@ use chrono::NaiveDate;
 use console::style;
 
 use crate::config::AppConfig;
+use crate::paths;
 use crate::util;
 
 use super::mic_check;
@@ -117,9 +118,10 @@ pub fn run_guided_session(date: &NaiveDate, config: &AppConfig) -> Result<()> {
     print_summary_row("Reading", &reading_stats);
 
     println!();
+    let rec_dir = paths::recordings_dir().join(date.to_string());
     println!(
         "  Recordings saved to {}",
-        style(format!("data/recordings/{date}/")).green()
+        style(rec_dir.display()).green()
     );
     println!();
     println!(

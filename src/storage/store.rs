@@ -1,22 +1,13 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 
 use super::session_data::SessionData;
-
-/// Base directory for session JSON files.
-fn sessions_dir() -> PathBuf {
-    PathBuf::from("data").join("sessions")
-}
-
-/// Path to a session JSON file for a given date.
-pub fn session_path(date: &str) -> PathBuf {
-    sessions_dir().join(format!("{date}.json"))
-}
+use crate::paths;
 
 /// Save session data to a JSON file.
 pub fn save_session(session: &SessionData) -> Result<()> {
-    let path = session_path(&session.date);
+    let path = paths::session_path(&session.date);
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -34,7 +25,7 @@ pub fn save_session(session: &SessionData) -> Result<()> {
 
 /// Load session data from a JSON file for a given date.
 pub fn load_session(date: &str) -> Result<SessionData> {
-    let path = session_path(date);
+    let path = paths::session_path(date);
     load_session_from_path(&path)
 }
 
@@ -50,7 +41,7 @@ fn load_session_from_path(path: &Path) -> Result<SessionData> {
 /// List all session dates, sorted chronologically.
 /// Scans the sessions directory for .json files.
 pub fn list_sessions() -> Result<Vec<String>> {
-    let dir = sessions_dir();
+    let dir = paths::sessions_dir();
 
     if !dir.exists() {
         return Ok(Vec::new());
@@ -110,7 +101,7 @@ mod tests {
         assert!((sustained.mpt_seconds - 5.0).abs() < 0.01);
 
         // Cleanup
-        let _ = std::fs::remove_file(session_path("2099-01-01"));
+        let _ = std::fs::remove_file(paths::session_path("2099-01-01"));
     }
 
     #[test]
@@ -120,7 +111,7 @@ mod tests {
 
     #[test]
     fn session_path_format() {
-        let path = session_path("2026-02-08");
-        assert_eq!(path, PathBuf::from("data/sessions/2026-02-08.json"));
+        let path = paths::session_path("2026-02-08");
+        assert!(path.ends_with("sessions/2026-02-08.json"));
     }
 }

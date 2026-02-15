@@ -97,7 +97,7 @@ pub fn analyze_session(date: &str, app_config: &AppConfig) -> Result<SessionData
 
     // Save results
     store::save_session(&session)?;
-    let save_path = store::session_path(date);
+    let save_path = crate::paths::session_path(date);
     println!();
     println!(
         "Results saved to {}",
