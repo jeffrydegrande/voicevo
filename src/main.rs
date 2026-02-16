@@ -3,12 +3,13 @@ mod audio;
 mod cli;
 mod config;
 mod dsp;
+mod llm;
 mod paths;
 mod report;
 mod storage;
 mod util;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use cli::{Cli, Command, RecordCommand};
 use console::style;
@@ -74,7 +75,7 @@ fn main() -> Result<()> {
             let dates = storage::store::list_sessions()?;
             if dates.is_empty() {
                 println!("No analyzed sessions found.");
-                println!("Run `voice-tracker analyze --date YYYY-MM-DD` first.");
+                println!("Run `voicevo analyze --date YYYY-MM-DD` first.");
                 return Ok(());
             }
 
@@ -160,8 +161,113 @@ fn main() -> Result<()> {
             report::compare::compare_sessions(&baseline, &current)
         }
 
+        Command::Explain { date, provider, model, fast, think, deep } => {
+            let date = date.unwrap_or_else(|| {
+                chrono::Local::now().format("%Y-%m-%d").to_string()
+            });
+
+            let tier = llm::provider::ModelTier::from_flags(fast, think);
+
+            let current = storage::store::load_session(&date)
+                .with_context(|| format!(
+                    "No analyzed session for {date}. Run `voicevo analyze --date {date}` first."
+                ))?;
+
+            // Load all prior sessions as historical context
+            let all_dates = storage::store::list_sessions()?;
+            let history: Vec<storage::session_data::SessionData> = all_dates
+                .iter()
+                .filter(|d| d.as_str() < date.as_str())
+                .filter_map(|d| storage::store::load_session(d).ok())
+                .collect();
+
+            if deep {
+                println!(
+                    "Deep analysis of session {} ({}) — querying Claude and GPT...",
+                    style(&date).cyan(),
+                    tier,
+                );
+                println!();
+
+                let report = llm::deep_interpret(&current, &history, tier)?;
+
+                println!("{}", style("--- Claude ---").blue().bold());
+                println!();
+                println!("{}", report.claude_response);
+                println!();
+                println!("{}", style("--- GPT ---").green().bold());
+                println!();
+                println!("{}", report.gpt_response);
+                println!();
+                println!("{}", style("--- Synthesis & Fact-Check ---").yellow().bold());
+                println!();
+                println!("{}", report.synthesis);
+            } else {
+                let provider = llm::provider::Provider::from_str_loose(&provider)?;
+                let resolved_model = model.as_deref()
+                    .unwrap_or_else(|| provider.model_for_tier(tier));
+
+                println!(
+                    "Interpreting session {} with {} ({})...",
+                    style(&date).cyan(),
+                    style(&provider).bold(),
+                    resolved_model,
+                );
+                println!();
+
+                let response = llm::interpret(
+                    &provider,
+                    Some(resolved_model),
+                    &current,
+                    &history,
+                )?;
+
+                println!("{response}");
+            }
+
+            Ok(())
+        }
+
+        Command::Browse => {
+            let reports = paths::reports_dir();
+            if !reports.exists() {
+                anyhow::bail!(
+                    "No reports found. Run `voicevo report --all` first."
+                );
+            }
+
+            // Find the most recent PNG report
+            let mut pngs: Vec<_> = std::fs::read_dir(&reports)?
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .is_some_and(|ext| ext == "png")
+                })
+                .collect();
+
+            if pngs.is_empty() {
+                anyhow::bail!(
+                    "No chart files found in {}. Run `voicevo report --all` first.",
+                    reports.display()
+                );
+            }
+
+            // Sort by name (report_YYYY-MM-DD.png) so last = newest
+            pngs.sort_by_key(|e| e.file_name());
+            let latest = pngs.last().unwrap().path();
+
+            println!("Opening {}", style(latest.display()).green());
+            std::process::Command::new("xdg-open")
+                .arg(&latest)
+                .spawn()
+                .context("Failed to run xdg-open. Install xdg-utils or open the file manually.")?;
+
+            Ok(())
+        }
+
         Command::Paths => {
-            println!("{}", style("voice-tracker paths").bold());
+            println!("{}", style("voicevo paths").bold());
             println!();
             println!("  Config:     {}", style(paths::config_dir().display()).cyan());
             println!("  Data:       {}", style(paths::data_dir().display()).cyan());

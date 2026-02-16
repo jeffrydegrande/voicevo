@@ -34,11 +34,16 @@ impl Default for PitchConfig {
     fn default() -> Self {
         Self {
             pitch_floor_hz: 30.0,
-            pitch_ceiling_hz: 500.0,
+            // 1000 Hz covers falsetto, head voice, and the elevated pitch
+            // common in vocal cord paralysis recovery.
+            pitch_ceiling_hz: 1000.0,
             frame_size_ms: 30.0,
             hop_size_ms: 10.0,
-            power_threshold: 2.0,
-            clarity_threshold: 0.3,
+            // Low power threshold to handle quiet/breathy voices typical
+            // in vocal cord paralysis — these signals are often 20-30 dB
+            // below normal speech levels.
+            power_threshold: 0.2,
+            clarity_threshold: 0.2,
         }
     }
 }
@@ -48,6 +53,8 @@ impl Default for PitchConfig {
 #[derive(Debug, Clone)]
 pub struct PitchFrame {
     /// Time in seconds from the start of the audio.
+    /// Used in tests and by callers inspecting the contour.
+    #[allow(dead_code)]
     pub time: f32,
 
     /// Detected fundamental frequency, or None if unvoiced.

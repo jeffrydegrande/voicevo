@@ -63,7 +63,7 @@ fn resolve_play_path(target: &str, exercise: Option<&str>) -> Result<PathBuf> {
     // Otherwise treat it as a date — exercise name is required
     let exercise = exercise.context(
         "When playing by date, you must specify an exercise name.\n\
-         Usage: voice-tracker play 2026-02-08 sustained",
+         Usage: voicevo play 2026-02-08 sustained",
     )?;
 
     let date = util::resolve_date(Some(target))?;

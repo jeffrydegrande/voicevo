@@ -12,7 +12,7 @@ use crate::util;
 
 /// Analyze all recordings for a given date and save the results.
 ///
-/// This is the main entry point for `voice-tracker analyze --date YYYY-MM-DD`.
+/// This is the main entry point for `voicevo analyze --date YYYY-MM-DD`.
 /// It loads each WAV file, runs the appropriate analysis pipeline, collects
 /// the results into a SessionData, and saves it as JSON.
 pub fn analyze_session(date: &str, app_config: &AppConfig) -> Result<SessionData> {

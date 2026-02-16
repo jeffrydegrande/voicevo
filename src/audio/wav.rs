@@ -57,7 +57,7 @@ mod tests {
 
     fn test_wav_path() -> PathBuf {
         // Use a temp dir so tests don't pollute the working directory
-        let dir = std::env::temp_dir().join("voice-tracker-tests");
+        let dir = std::env::temp_dir().join("voicevo-tests");
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("roundtrip.wav")
     }
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn load_nonexistent_file() {
-        let result = load_samples(Path::new("/tmp/does-not-exist-voice-tracker.wav"));
+        let result = load_samples(Path::new("/tmp/does-not-exist-voicevo.wav"));
         assert!(result.is_err());
     }
 }

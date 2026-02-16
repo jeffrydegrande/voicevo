@@ -83,7 +83,7 @@ impl Default for AnalysisConfig {
     fn default() -> Self {
         Self {
             pitch_floor_hz: 30.0,
-            pitch_ceiling_hz: 500.0,
+            pitch_ceiling_hz: 1000.0,
             frame_size_ms: 30.0,
             hop_size_ms: 10.0,
             thresholds: ThresholdConfig::default(),
@@ -130,7 +130,7 @@ impl From<&AnalysisConfig> for PitchConfig {
     }
 }
 
-/// Load the application config from $XDG_CONFIG_HOME/voice-tracker/config.toml.
+/// Load the application config from $XDG_CONFIG_HOME/voicevo/config.toml.
 /// If the file doesn't exist, returns defaults.
 pub fn load_config() -> Result<AppConfig> {
     let path = paths::config_file();
@@ -144,29 +144,6 @@ pub fn load_config() -> Result<AppConfig> {
 
     toml::from_str(&contents)
         .with_context(|| format!("Failed to parse config file: {}", path.display()))
-}
-
-/// Write the default config if it doesn't exist.
-/// Useful for first-time setup so users can see what's configurable.
-pub fn write_default_config_if_missing() -> Result<()> {
-    let path = paths::config_file();
-
-    if path.exists() {
-        return Ok(());
-    }
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let default = AppConfig::default();
-    let toml_str = toml::to_string_pretty(&default)
-        .context("Failed to serialize default config")?;
-
-    std::fs::write(&path, toml_str)
-        .with_context(|| format!("Failed to write config file: {}", path.display()))?;
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -191,7 +168,7 @@ pitch_floor_hz = 40.0
         let cfg: AppConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.analysis.pitch_floor_hz, 40.0);
         // Unspecified fields should be defaults
-        assert_eq!(cfg.analysis.pitch_ceiling_hz, 500.0);
+        assert_eq!(cfg.analysis.pitch_ceiling_hz, 1000.0);
         assert_eq!(cfg.recording.sample_rate, 44100);
     }
 

@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "voice-tracker")]
+#[command(name = "voicevo")]
 #[command(about = "Track vocal cord recovery with objective measurements")]
 pub struct Cli {
     #[command(subcommand)]
@@ -63,6 +63,37 @@ pub enum Command {
 
     /// List all recorded sessions
     Sessions,
+
+    /// Get an LLM interpretation of a session's analysis
+    Explain {
+        /// Session date (defaults to today)
+        #[arg(long)]
+        date: Option<String>,
+
+        /// LLM provider: "claude" or "gpt"
+        #[arg(long, default_value = "claude")]
+        provider: String,
+
+        /// Model override (ignores --fast/--think)
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Use fastest/cheapest model (Haiku / GPT-5.2)
+        #[arg(long, conflicts_with = "think")]
+        fast: bool,
+
+        /// Use most capable model (Opus / GPT-5.2-pro)
+        #[arg(long, conflicts_with = "fast")]
+        think: bool,
+
+        /// Deep report: get interpretations from both Claude and GPT,
+        /// then synthesize and fact-check the findings
+        #[arg(long)]
+        deep: bool,
+    },
+
+    /// Open the latest report in your default viewer
+    Browse,
 
     /// Show where data and config files are stored
     Paths,

@@ -126,7 +126,7 @@ pub fn run_guided_session(date: &NaiveDate, config: &AppConfig) -> Result<()> {
     println!();
     println!(
         "  Run {} to analyze this session.",
-        style(format!("voice-tracker analyze --date {date}")).cyan()
+        style(format!("voicevo analyze --date {date}")).cyan()
     );
 
     Ok(())

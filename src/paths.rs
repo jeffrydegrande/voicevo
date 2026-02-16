@@ -1,15 +1,15 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-/// XDG-compliant directory layout for voice-tracker.
+/// XDG-compliant directory layout for voicevo.
 ///
 /// On Linux this follows the XDG Base Directory Specification:
-///   Config:  $XDG_CONFIG_HOME/voice-tracker  (~/.config/voice-tracker)
-///   Data:    $XDG_DATA_HOME/voice-tracker    (~/.local/share/voice-tracker)
+///   Config:  $XDG_CONFIG_HOME/voicevo  (~/.config/voicevo)
+///   Data:    $XDG_DATA_HOME/voicevo    (~/.local/share/voicevo)
 ///
 /// On macOS:
-///   Config:  ~/Library/Application Support/voice-tracker
-///   Data:    ~/Library/Application Support/voice-tracker
+///   Config:  ~/Library/Application Support/voicevo
+///   Data:    ~/Library/Application Support/voicevo
 ///
 /// The `dirs` crate handles platform detection. We cache the resolved
 /// base paths in static OnceLock cells so directory lookup only happens once.
@@ -17,21 +17,21 @@ use std::sync::OnceLock;
 static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
-/// Root data directory: $XDG_DATA_HOME/voice-tracker
+/// Root data directory: $XDG_DATA_HOME/voicevo
 pub fn data_dir() -> &'static PathBuf {
     DATA_DIR.get_or_init(|| {
         dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("voice-tracker")
+            .join("voicevo")
     })
 }
 
-/// Root config directory: $XDG_CONFIG_HOME/voice-tracker
+/// Root config directory: $XDG_CONFIG_HOME/voicevo
 pub fn config_dir() -> &'static PathBuf {
     CONFIG_DIR.get_or_init(|| {
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("voice-tracker")
+            .join("voicevo")
     })
 }
 
@@ -74,13 +74,13 @@ mod tests {
     #[test]
     fn data_dir_ends_with_voice_tracker() {
         let dir = data_dir();
-        assert!(dir.ends_with("voice-tracker"));
+        assert!(dir.ends_with("voicevo"));
     }
 
     #[test]
     fn config_dir_ends_with_voice_tracker() {
         let dir = config_dir();
-        assert!(dir.ends_with("voice-tracker"));
+        assert!(dir.ends_with("voicevo"));
     }
 
     #[test]

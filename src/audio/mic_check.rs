@@ -144,7 +144,7 @@ pub fn run() -> Result<()> {
             "  {} Peak is below -60 dB — mic may be muted or disconnected.",
             style("WARNING").red().bold()
         );
-        eprintln!("  Run `voice-tracker devices` to check available inputs.");
+        eprintln!("  Run `voicevo devices` to check available inputs.");
     } else if peak < -30.0 {
         println!(
             "  {} Signal detected but quiet. Consider increasing mic gain.",
