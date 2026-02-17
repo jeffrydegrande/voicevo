@@ -222,3 +222,33 @@ pub fn wait_for_enter() -> Result<()> {
     crossterm::terminal::disable_raw_mode()?;
     Ok(())
 }
+
+/// User's choice after reviewing a recording.
+pub enum PostRecordChoice {
+    Keep,
+    Rerecord,
+}
+
+/// Block until the user presses Enter (keep) or 'r' (re-record).
+pub fn wait_for_keep_or_rerecord() -> Result<PostRecordChoice> {
+    crossterm::terminal::enable_raw_mode()?;
+
+    let choice = loop {
+        if event::poll(std::time::Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Enter => break PostRecordChoice::Keep,
+                        KeyCode::Char('r') | KeyCode::Char('R') => {
+                            break PostRecordChoice::Rerecord
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    };
+
+    crossterm::terminal::disable_raw_mode()?;
+    Ok(choice)
+}

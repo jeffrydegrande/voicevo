@@ -108,51 +108,53 @@ fn main() -> Result<()> {
         }
 
         Command::Report { last, all } => {
-            let dates = storage::store::list_sessions()?;
-            if dates.is_empty() {
-                println!("No analyzed sessions found.");
-                return Ok(());
-            }
-
-            // Select which sessions to include
-            let selected: Vec<String> = if all {
-                dates
+            if all {
+                report::generate_full_report(&app_config)?;
             } else {
+                let dates = storage::store::list_sessions()?;
+                if dates.is_empty() {
+                    println!("No analyzed sessions found.");
+                    return Ok(());
+                }
+
                 let n = last.unwrap_or(8);
-                dates.into_iter().rev().take(n).collect::<Vec<_>>().into_iter().rev().collect()
-            };
+                let selected: Vec<String> = dates
+                    .into_iter()
+                    .rev()
+                    .take(n)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
 
-            // Load session data
-            let sessions: Vec<storage::session_data::SessionData> = selected
-                .iter()
-                .filter_map(|d| storage::store::load_session(d).ok())
-                .collect();
+                let sessions: Vec<storage::session_data::SessionData> = selected
+                    .iter()
+                    .filter_map(|d| storage::store::load_session(d).ok())
+                    .collect();
 
-            if sessions.is_empty() {
-                println!("No valid sessions found.");
-                return Ok(());
+                if sessions.is_empty() {
+                    println!("No valid sessions found.");
+                    return Ok(());
+                }
+
+                let reports = paths::reports_dir();
+                std::fs::create_dir_all(&reports)?;
+
+                let chart_path = reports.join(format!(
+                    "report_{}.png",
+                    chrono::Local::now().format("%Y-%m-%d")
+                ));
+                report::charts::generate_trend_chart(&sessions, &chart_path)?;
+                println!("Chart saved to {}", style(chart_path.display()).green());
+
+                let md = report::markdown::generate_report(&sessions, &app_config)?;
+                let md_path = reports.join(format!(
+                    "report_{}.md",
+                    chrono::Local::now().format("%Y-%m-%d")
+                ));
+                std::fs::write(&md_path, &md)?;
+                println!("Report saved to {}", style(md_path.display()).green());
             }
-
-            // Generate chart PNG
-            let reports = paths::reports_dir();
-            let chart_path = reports
-                .join(format!("report_{}.png", chrono::Local::now().format("%Y-%m-%d")));
-            report::charts::generate_trend_chart(&sessions, &chart_path)?;
-            println!(
-                "Chart saved to {}",
-                style(chart_path.display()).green()
-            );
-
-            // Generate markdown report
-            let md = report::markdown::generate_report(&sessions, &app_config)?;
-            let md_path = reports
-                .join(format!("report_{}.md", chrono::Local::now().format("%Y-%m-%d")));
-            std::fs::create_dir_all(&reports)?;
-            std::fs::write(&md_path, &md)?;
-            println!(
-                "Report saved to {}",
-                style(md_path.display()).green()
-            );
 
             Ok(())
         }
