@@ -232,6 +232,53 @@ fn main() -> Result<()> {
             Ok(())
         }
 
+        Command::Discard { exercise, date } => {
+            let date_str = date.unwrap_or_else(|| {
+                chrono::Local::now().format("%Y-%m-%d").to_string()
+            });
+            let date_obj = util::resolve_date(Some(&date_str))?;
+
+            let path = if let Some(ref ex) = exercise {
+                paths::latest_attempt_path(&date_obj, ex)
+            } else {
+                // No exercise specified: find most recently modified WAV across all exercises
+                ["sustained", "scale", "reading"]
+                    .iter()
+                    .filter_map(|ex| paths::latest_attempt_path(&date_obj, ex))
+                    .filter_map(|p| {
+                        std::fs::metadata(&p)
+                            .and_then(|m| m.modified())
+                            .ok()
+                            .map(|t| (p, t))
+                    })
+                    .max_by_key(|(_, t)| *t)
+                    .map(|(p, _)| p)
+            };
+
+            match path {
+                Some(p) => {
+                    std::fs::remove_file(&p)?;
+                    println!("Discarded {}", style(p.display()).red());
+                    println!();
+                    println!(
+                        "Re-record with {}, then {}.",
+                        style("voicevo record <exercise>").cyan(),
+                        style("voicevo analyze").cyan()
+                    );
+                }
+                None => {
+                    let target = exercise.as_deref().unwrap_or("any exercise");
+                    println!(
+                        "No recordings found for {} on {}.",
+                        style(target).cyan(),
+                        style(&date_str).cyan()
+                    );
+                }
+            }
+
+            Ok(())
+        }
+
         Command::Browse => {
             let reports = paths::reports_dir();
             if !reports.exists() {

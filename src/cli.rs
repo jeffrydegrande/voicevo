@@ -92,6 +92,16 @@ pub enum Command {
         deep: bool,
     },
 
+    /// Discard the latest recording attempt for an exercise
+    Discard {
+        /// Exercise name (sustained, scale, reading). If omitted, discards the most recently modified recording.
+        exercise: Option<String>,
+
+        /// Date of the recording (defaults to today)
+        #[arg(long)]
+        date: Option<String>,
+    },
+
     /// Open the latest report in your default viewer
     Browse,
 
