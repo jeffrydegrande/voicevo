@@ -8,7 +8,7 @@ use crate::storage::session_data::SessionData;
 /// Chart dimensions
 const WIDTH: u32 = 1200;
 const PANEL_HEIGHT: u32 = 250;
-const PANELS: u32 = 6;
+const PANELS: u32 = 7;
 const TOTAL_HEIGHT: u32 = PANEL_HEIGHT * PANELS + 80; // extra for title
 
 /// Colors for chart lines/points
@@ -45,23 +45,26 @@ pub fn generate_trend_chart(sessions: &[SessionData], output_path: &Path) -> Res
     let dates: Vec<&str> = sessions.iter().map(|s| s.date.as_str()).collect();
     let x_range = 0..dates.len();
 
-    // Panel 1: Pitch Range (floor + ceiling)
-    draw_pitch_range(&panels[0], sessions, &dates, x_range.clone())?;
+    // Panel 1: Voice Quality Index (composite)
+    draw_voice_quality(&panels[0], sessions, &dates, x_range.clone())?;
 
-    // Panel 2: HNR
-    draw_hnr(&panels[1], sessions, &dates, x_range.clone())?;
+    // Panel 2: Pitch Range (floor + ceiling)
+    draw_pitch_range(&panels[1], sessions, &dates, x_range.clone())?;
 
-    // Panel 3: Jitter + Shimmer
-    draw_jitter_shimmer(&panels[2], sessions, &dates, x_range.clone())?;
+    // Panel 3: HNR
+    draw_hnr(&panels[2], sessions, &dates, x_range.clone())?;
 
-    // Panel 4: MPT
-    draw_mpt(&panels[3], sessions, &dates, x_range.clone())?;
+    // Panel 4: Jitter + Shimmer
+    draw_jitter_shimmer(&panels[3], sessions, &dates, x_range.clone())?;
 
-    // Panel 5: Voice Breaks
-    draw_voice_breaks(&panels[4], sessions, &dates, x_range.clone())?;
+    // Panel 5: MPT
+    draw_mpt(&panels[4], sessions, &dates, x_range.clone())?;
 
-    // Panel 6: Mean Speaking F0
-    draw_mean_f0(&panels[5], sessions, &dates, x_range)?;
+    // Panel 6: Voice Breaks
+    draw_voice_breaks(&panels[5], sessions, &dates, x_range.clone())?;
+
+    // Panel 7: Mean Speaking F0
+    draw_mean_f0(&panels[6], sessions, &dates, x_range)?;
 
     root.present().context("Failed to write chart PNG")?;
 
@@ -423,4 +426,108 @@ fn min_max_with_margin(values: &[f32], default_min: f32, default_max: f32) -> (f
     let max = values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let margin = (max - min).max(1.0) * 0.1;
     (min - margin, max + margin)
+}
+
+/// Compute a composite Voice Quality Index (0–100, higher = healthier) from
+/// whichever metrics are available in a session.
+///
+/// Each metric is linearly mapped to 0–100:
+///   HNR:            0 dB → 0,   20 dB → 100
+///   Jitter:         5%  → 0,    0%    → 100
+///   Shimmer:       50%  → 0,    0%    → 100
+///   MPT:            0 s → 0,   20 s   → 100
+///   Voice breaks:  40   → 0,    0     → 100
+///   Voiced frac:   0.2  → 0,    0.8   → 100
+///
+/// All sub-scores are clamped to [0, 100] then averaged.
+fn compute_voice_quality_index(session: &SessionData) -> Option<f32> {
+    let mut scores = Vec::new();
+
+    if let Some(ref s) = session.analysis.sustained {
+        // HNR: 0 dB = 0, 20 dB = 100
+        scores.push(((s.hnr_db / 20.0) * 100.0).clamp(0.0, 100.0));
+        // Jitter: 5% = 0, 0% = 100
+        scores.push(((1.0 - s.jitter_local_percent / 5.0) * 100.0).clamp(0.0, 100.0));
+        // Shimmer: 50% = 0, 0% = 100
+        scores.push(((1.0 - s.shimmer_local_percent / 50.0) * 100.0).clamp(0.0, 100.0));
+        // MPT: 0s = 0, 20s = 100
+        scores.push(((s.mpt_seconds / 20.0) * 100.0).clamp(0.0, 100.0));
+    }
+
+    if let Some(ref r) = session.analysis.reading {
+        // Voice breaks: 40 = 0, 0 = 100
+        scores.push(((1.0 - r.voice_breaks as f32 / 40.0) * 100.0).clamp(0.0, 100.0));
+        // Voiced fraction: 0.2 = 0, 0.8 = 100
+        scores.push((((r.voiced_fraction - 0.2) / 0.6) * 100.0).clamp(0.0, 100.0));
+    }
+
+    if scores.is_empty() {
+        None
+    } else {
+        Some(scores.iter().sum::<f32>() / scores.len() as f32)
+    }
+}
+
+fn draw_voice_quality(
+    area: &DrawingArea<BitMapBackend, plotters::coord::Shift>,
+    sessions: &[SessionData],
+    dates: &[&str],
+    x_range: std::ops::Range<usize>,
+) -> Result<()> {
+    let values: Vec<Option<f32>> = sessions
+        .iter()
+        .map(compute_voice_quality_index)
+        .collect();
+
+    let mut chart = ChartBuilder::on(area)
+        .caption("Voice Quality Index (0–100)", ("sans-serif", 18))
+        .margin(5)
+        .x_label_area_size(30)
+        .y_label_area_size(50)
+        .build_cartesian_2d(x_range, 0.0_f32..105.0_f32)?;
+
+    chart
+        .configure_mesh()
+        .x_labels(8)
+        .x_label_formatter(&|x| {
+            date_labels(dates)
+                .iter()
+                .find(|(i, _)| i == x)
+                .map(|(_, l)| l.clone())
+                .unwrap_or_default()
+        })
+        .draw()?;
+
+    // Shade zones: red (0-33), yellow (33-66), green (66-100)
+    let n = dates.len().max(1);
+    chart.draw_series(std::iter::once(Rectangle::new(
+        [(0, 0.0_f32), (n, 33.0_f32)],
+        RGBColor(255, 200, 200).filled(),
+    )))?;
+    chart.draw_series(std::iter::once(Rectangle::new(
+        [(0, 33.0_f32), (n, 66.0_f32)],
+        RGBColor(255, 240, 200).filled(),
+    )))?;
+    chart.draw_series(std::iter::once(Rectangle::new(
+        [(0, 66.0_f32), (n, 100.0_f32)],
+        RGBColor(200, 255, 200).filled(),
+    )))?;
+
+    let points: Vec<(usize, f32)> = values
+        .iter()
+        .enumerate()
+        .filter_map(|(i, v)| v.map(|f| (i, f)))
+        .collect();
+
+    chart.draw_series(LineSeries::new(
+        points.iter().copied(),
+        COLOR_PRIMARY.stroke_width(2),
+    ))?;
+    chart.draw_series(
+        points
+            .iter()
+            .map(|&(x, y)| Circle::new((x, y), 5, COLOR_PRIMARY.filled())),
+    )?;
+
+    Ok(())
 }
