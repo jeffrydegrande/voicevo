@@ -10,6 +10,7 @@ use cpal::SampleFormat;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
 use crate::audio::wav;
+use crate::paths;
 use crate::util;
 
 /// Stats returned after a recording completes.
@@ -21,9 +22,12 @@ pub struct RecordingStats {
 }
 
 /// Record a named exercise for a given date.
-/// Creates the WAV file at data/recordings/YYYY-MM-DD/{exercise}.wav.
+/// Creates a new numbered attempt: {exercise}_001.wav, _002.wav, etc.
 pub fn record_exercise(exercise: &str, date: &NaiveDate) -> Result<()> {
-    let path = util::recording_path(date, exercise);
+    let path = paths::next_attempt_path(date, exercise);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
 
     println!(
         "{} {}",

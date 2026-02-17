@@ -6,16 +6,13 @@ use anyhow::{Context, Result};
 use console::style;
 use rodio::{Decoder, OutputStream, Sink};
 
+use crate::paths;
 use crate::util;
 
 /// Play back a recording. `target` is either a YYYY-MM-DD date or a direct file path.
 /// If it's a date, `exercise` must be provided (e.g., "sustained").
 pub fn play(target: &str, exercise: Option<&str>) -> Result<()> {
     let path = resolve_play_path(target, exercise)?;
-
-    if !path.exists() {
-        anyhow::bail!("File not found: {}", path.display());
-    }
 
     println!(
         "Playing {}",
@@ -67,7 +64,8 @@ fn resolve_play_path(target: &str, exercise: Option<&str>) -> Result<PathBuf> {
     )?;
 
     let date = util::resolve_date(Some(target))?;
-    Ok(util::recording_path(&date, exercise))
+    paths::latest_attempt_path(&date, exercise)
+        .context(format!("No recordings found for {exercise} on {date}"))
 }
 
 #[cfg(test)]
@@ -87,9 +85,10 @@ mod tests {
     }
 
     #[test]
-    fn resolve_date_with_exercise() {
-        let path = resolve_play_path("2026-02-08", Some("sustained")).unwrap();
-        assert!(path.ends_with("recordings/2026-02-08/sustained.wav"));
+    fn resolve_date_with_exercise_no_recordings() {
+        // With no recordings on disk, latest_attempt_path returns None → error
+        let result = resolve_play_path("2099-01-01", Some("sustained"));
+        assert!(result.is_err());
     }
 
     #[test]

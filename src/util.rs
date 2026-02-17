@@ -1,12 +1,4 @@
-use std::path::PathBuf;
-
 use chrono::NaiveDate;
-
-/// Build the XDG-compliant path for a recording.
-/// Delegates to `paths::recording_path` for consistent directory resolution.
-pub fn recording_path(date: &NaiveDate, exercise: &str) -> PathBuf {
-    crate::paths::recording_path(date, exercise)
-}
 
 /// Resolve a date string to a NaiveDate, defaulting to today.
 pub fn resolve_date(date: Option<&str>) -> anyhow::Result<NaiveDate> {
@@ -96,14 +88,6 @@ mod tests {
     #[test]
     fn rms_db_empty() {
         assert!(rms_db(&[]).is_infinite());
-    }
-
-    #[test]
-    fn recording_path_format() {
-        let date = NaiveDate::from_ymd_opt(2026, 2, 8).unwrap();
-        let path = recording_path(&date, "sustained");
-        // XDG-compliant: ends with the expected structure
-        assert!(path.ends_with("recordings/2026-02-08/sustained.wav"));
     }
 
     #[test]

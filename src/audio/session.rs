@@ -4,7 +4,6 @@ use console::style;
 
 use crate::config::AppConfig;
 use crate::paths;
-use crate::util;
 
 use super::mic_check;
 use super::recorder;
@@ -54,7 +53,10 @@ pub fn run_guided_session(date: &NaiveDate, config: &AppConfig) -> Result<()> {
     println!("  Take a deep breath, then hold {} as long as comfortable.", style("\"AAAH\"").cyan());
     println!();
 
-    let sustained_path = util::recording_path(date, "sustained");
+    let sustained_path = paths::next_attempt_path(date, "sustained");
+    if let Some(parent) = sustained_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let sustained_stats = record_exercise_with_path(&sustained_path)?;
 
     println!();
@@ -74,7 +76,10 @@ pub fn run_guided_session(date: &NaiveDate, config: &AppConfig) -> Result<()> {
     println!("  then back down.");
     println!();
 
-    let scale_path = util::recording_path(date, "scale");
+    let scale_path = paths::next_attempt_path(date, "scale");
+    if let Some(parent) = scale_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let scale_stats = record_exercise_with_path(&scale_path)?;
 
     println!();
@@ -93,7 +98,10 @@ pub fn run_guided_session(date: &NaiveDate, config: &AppConfig) -> Result<()> {
     }
     println!();
 
-    let reading_path = util::recording_path(date, "reading");
+    let reading_path = paths::next_attempt_path(date, "reading");
+    if let Some(parent) = reading_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let reading_stats = record_exercise_with_path(&reading_path)?;
 
     println!();

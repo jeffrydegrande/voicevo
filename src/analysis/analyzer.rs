@@ -6,6 +6,7 @@ use console::style;
 use crate::audio::wav;
 use crate::config::AppConfig;
 use crate::dsp::pitch::PitchConfig;
+use crate::paths;
 use crate::storage::session_data::*;
 use crate::storage::store;
 use crate::util;
@@ -26,20 +27,20 @@ pub fn analyze_session(date: &str, app_config: &AppConfig) -> Result<SessionData
 
     let date_obj = util::resolve_date(Some(date))?;
 
-    // Check which recordings exist
-    let sustained_path = util::recording_path(&date_obj, "sustained");
-    let scale_path = util::recording_path(&date_obj, "scale");
-    let reading_path = util::recording_path(&date_obj, "reading");
+    // Find latest attempt for each exercise
+    let sustained_path = paths::latest_attempt_path(&date_obj, "sustained");
+    let scale_path = paths::latest_attempt_path(&date_obj, "scale");
+    let reading_path = paths::latest_attempt_path(&date_obj, "reading");
 
     // Analyze each exercise that has a recording.
     // We print results as we go so the user gets immediate feedback.
 
     let thresholds = &app_config.analysis.thresholds;
 
-    let sustained = if sustained_path.exists() {
+    let sustained = if let Some(ref p) = sustained_path {
         Some(analyze_exercise(
             "Sustained vowel",
-            &sustained_path,
+            p,
             |samples, sr| {
                 let result = super::sustained::analyze(samples, sr, &pitch_config)?;
                 print_sustained_results(&result, thresholds);
@@ -47,14 +48,14 @@ pub fn analyze_session(date: &str, app_config: &AppConfig) -> Result<SessionData
             },
         )?)
     } else {
-        println!("  {} sustained.wav not found, skipping", style("SKIP").yellow());
+        println!("  {} sustained recording not found, skipping", style("SKIP").yellow());
         None
     };
 
-    let scale = if scale_path.exists() {
+    let scale = if let Some(ref p) = scale_path {
         Some(analyze_exercise(
             "Chromatic scale",
-            &scale_path,
+            p,
             |samples, sr| {
                 let result = super::scale::analyze(samples, sr, &pitch_config)?;
                 print_scale_results(&result);
@@ -62,14 +63,14 @@ pub fn analyze_session(date: &str, app_config: &AppConfig) -> Result<SessionData
             },
         )?)
     } else {
-        println!("  {} scale.wav not found, skipping", style("SKIP").yellow());
+        println!("  {} scale recording not found, skipping", style("SKIP").yellow());
         None
     };
 
-    let reading = if reading_path.exists() {
+    let reading = if let Some(ref p) = reading_path {
         Some(analyze_exercise(
             "Reading passage",
-            &reading_path,
+            p,
             |samples, sr| {
                 let result = super::reading::analyze(samples, sr, &pitch_config)?;
                 print_reading_results(&result);
@@ -77,16 +78,16 @@ pub fn analyze_session(date: &str, app_config: &AppConfig) -> Result<SessionData
             },
         )?)
     } else {
-        println!("  {} reading.wav not found, skipping", style("SKIP").yellow());
+        println!("  {} reading recording not found, skipping", style("SKIP").yellow());
         None
     };
 
     let session = SessionData {
         date: date.to_string(),
         recordings: SessionRecordings {
-            sustained: sustained_path.exists().then(|| sustained_path.to_string_lossy().into()),
-            scale: scale_path.exists().then(|| scale_path.to_string_lossy().into()),
-            reading: reading_path.exists().then(|| reading_path.to_string_lossy().into()),
+            sustained: sustained_path.map(|p| p.to_string_lossy().into()),
+            scale: scale_path.map(|p| p.to_string_lossy().into()),
+            reading: reading_path.map(|p| p.to_string_lossy().into()),
         },
         analysis: SessionAnalysis {
             sustained,
