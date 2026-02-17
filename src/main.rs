@@ -181,6 +181,9 @@ fn main() -> Result<()> {
                 .filter_map(|d| storage::store::load_session(d).ok())
                 .collect();
 
+            // Load the latest trend report if available
+            let trend_report = load_latest_report();
+
             if deep {
                 println!(
                     "Deep analysis of session {} ({}) — querying Claude and GPT...",
@@ -189,7 +192,7 @@ fn main() -> Result<()> {
                 );
                 println!();
 
-                let report = llm::deep_interpret(&current, &history, tier)?;
+                let report = llm::deep_interpret(&current, &history, tier, trend_report.as_deref())?;
 
                 println!("{}", style("--- Claude ---").blue().bold());
                 println!();
@@ -220,6 +223,7 @@ fn main() -> Result<()> {
                     Some(resolved_model),
                     &current,
                     &history,
+                    trend_report.as_deref(),
                 )?;
 
                 println!("{response}");
@@ -277,6 +281,28 @@ fn main() -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// Load the latest markdown trend report, if any exist.
+fn load_latest_report() -> Option<String> {
+    let reports = paths::reports_dir();
+    let mut mds: Vec<_> = std::fs::read_dir(&reports)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .is_some_and(|ext| ext == "md")
+        })
+        .collect();
+
+    if mds.is_empty() {
+        return None;
+    }
+
+    mds.sort_by_key(|e| e.file_name());
+    let latest = mds.last().unwrap().path();
+    std::fs::read_to_string(latest).ok()
 }
 
 /// Find all dates that have recording directories.

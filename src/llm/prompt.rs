@@ -57,7 +57,7 @@ Keep it to 2-3 short paragraphs. Don't repeat the raw numbers back — the patie
 /// Build the user message from the current session and optional history.
 /// Formats the data as readable text rather than raw JSON so the LLM
 /// can focus on interpretation rather than parsing.
-pub fn user_prompt(current: &SessionData, history: &[SessionData]) -> String {
+pub fn user_prompt(current: &SessionData, history: &[SessionData], trend_report: Option<&str>) -> String {
     let mut parts = Vec::new();
 
     parts.push(format!("## Current session: {}", current.date));
@@ -89,6 +89,14 @@ pub fn user_prompt(current: &SessionData, history: &[SessionData]) -> String {
         parts.push(format!("- F0 range: {:.1} - {:.1} Hz", s.f0_range_hz.0, s.f0_range_hz.1));
         parts.push(format!("- Voice breaks: {}", s.voice_breaks));
         parts.push(format!("- Voiced fraction: {:.0}%", s.voiced_fraction * 100.0));
+        parts.push(String::new());
+    }
+
+    // Add pre-computed trend report if available
+    if let Some(report) = trend_report {
+        parts.push("## Trend Report (pre-computed)".into());
+        parts.push(String::new());
+        parts.push(report.to_string());
         parts.push(String::new());
     }
 
@@ -153,7 +161,7 @@ pub fn synthesis_user_prompt(
     claude_response: &str,
     gpt_response: &str,
 ) -> String {
-    let data = user_prompt(current, history);
+    let data = user_prompt(current, history, None);
 
     format!(
         "## Raw measurement data\n\n{data}\n\n\
@@ -204,7 +212,7 @@ mod tests {
     #[test]
     fn user_prompt_includes_current_data() {
         let session = sample_session("2026-02-15");
-        let prompt = user_prompt(&session, &[]);
+        let prompt = user_prompt(&session, &[], None);
         assert!(prompt.contains("2026-02-15"));
         assert!(prompt.contains("645.0 Hz"));
         assert!(prompt.contains("8.0 seconds"));
@@ -214,7 +222,7 @@ mod tests {
     fn user_prompt_includes_history() {
         let current = sample_session("2026-02-22");
         let history = vec![sample_session("2026-02-15")];
-        let prompt = user_prompt(&current, &history);
+        let prompt = user_prompt(&current, &history, None);
         assert!(prompt.contains("History (1 prior session)"));
         assert!(prompt.contains("2026-02-15"));
     }
@@ -222,8 +230,23 @@ mod tests {
     #[test]
     fn user_prompt_no_history_section_when_empty() {
         let current = sample_session("2026-02-15");
-        let prompt = user_prompt(&current, &[]);
+        let prompt = user_prompt(&current, &[], None);
         assert!(!prompt.contains("History"));
+    }
+
+    #[test]
+    fn user_prompt_includes_trend_report() {
+        let session = sample_session("2026-02-15");
+        let prompt = user_prompt(&session, &[], Some("MPT improving +2.1s"));
+        assert!(prompt.contains("Trend Report (pre-computed)"));
+        assert!(prompt.contains("MPT improving +2.1s"));
+    }
+
+    #[test]
+    fn user_prompt_no_trend_section_when_none() {
+        let session = sample_session("2026-02-15");
+        let prompt = user_prompt(&session, &[], None);
+        assert!(!prompt.contains("Trend Report"));
     }
 
     #[test]

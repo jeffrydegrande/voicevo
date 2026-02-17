@@ -18,12 +18,13 @@ pub fn interpret(
     model: Option<&str>,
     current: &SessionData,
     history: &[SessionData],
+    trend_report: Option<&str>,
 ) -> Result<String> {
     let api_key = provider.api_key()?;
     let model = model.unwrap_or_else(|| provider.default_model());
 
     let system = prompt::system_prompt();
-    let user = prompt::user_prompt(current, history);
+    let user = prompt::user_prompt(current, history, trend_report);
 
     match provider {
         Provider::Anthropic => anthropic::complete(&api_key, model, &system, &user),
@@ -45,6 +46,7 @@ pub fn deep_interpret(
     current: &SessionData,
     history: &[SessionData],
     tier: provider::ModelTier,
+    trend_report: Option<&str>,
 ) -> Result<DeepReport> {
     let claude = Provider::Anthropic;
     let gpt = Provider::OpenAI;
@@ -54,7 +56,7 @@ pub fn deep_interpret(
     let gpt_key = gpt.api_key()?;
 
     let system = prompt::system_prompt();
-    let user = prompt::user_prompt(current, history);
+    let user = prompt::user_prompt(current, history, trend_report);
 
     let claude_model = claude.model_for_tier(tier);
     let gpt_model = gpt.model_for_tier(tier);
