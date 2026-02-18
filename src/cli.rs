@@ -105,8 +105,23 @@ pub enum Command {
     /// Open the latest report in your default viewer
     Browse,
 
+    /// Interactive voice exercises with real-time feedback
+    Exercise {
+        #[command(subcommand)]
+        exercise: ExerciseCommand,
+    },
+
+    /// Export all data as LLM-friendly markdown and copy to clipboard
+    Dump,
+
     /// Show where data and config files are stored
     Paths,
+}
+
+#[derive(Subcommand)]
+pub enum ExerciseCommand {
+    /// Sustained phonation: hold "AAAH" with live timer and volume meter
+    Sustain,
 }
 
 #[derive(Subcommand)]
