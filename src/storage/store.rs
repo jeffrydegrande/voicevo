@@ -82,6 +82,7 @@ mod tests {
                     jitter_local_percent: 1.5,
                     shimmer_local_percent: 4.0,
                     hnr_db: 10.0,
+                    detection_quality: None,
                 }),
                 scale: None,
                 reading: None,

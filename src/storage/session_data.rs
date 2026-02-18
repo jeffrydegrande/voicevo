@@ -45,6 +45,11 @@ pub struct SustainedAnalysis {
     pub shimmer_local_percent: f32,
     /// Harmonic-to-noise ratio in decibels
     pub hnr_db: f32,
+    /// How voiced frames were detected: "pitch" (normal), "relaxed_pitch"
+    /// (lower thresholds), or "energy_fallback" (RMS-based, pitch estimated).
+    /// When "energy_fallback", jitter is zeroed and shimmer/HNR use estimated pitch.
+    #[serde(default)]
+    pub detection_quality: Option<String>,
 }
 
 /// Analysis of the chromatic scale recording.
@@ -73,6 +78,10 @@ pub struct ReadingAnalysis {
     pub voice_breaks: usize,
     /// Fraction of frames that are voiced (0.0 to 1.0)
     pub voiced_fraction: f32,
+    /// How voiced frames were detected. See SustainedAnalysis::detection_quality.
+    /// When "energy_fallback", voice_breaks is zeroed.
+    #[serde(default)]
+    pub detection_quality: Option<String>,
 }
 
 #[cfg(test)]
@@ -96,6 +105,7 @@ mod tests {
                     jitter_local_percent: 2.1,
                     shimmer_local_percent: 5.8,
                     hnr_db: 12.3,
+                    detection_quality: None,
                 }),
                 scale: Some(ScaleAnalysis {
                     pitch_floor_hz: 42.0,
