@@ -42,6 +42,19 @@ Recovery is gradual over months. Signs of improvement include:
 - **Voice breaks**: pauses in voicing between 50-500ms. These indicate moments where the cord cannot sustain vibration.
 - **Voiced fraction**: percentage of speech that is actually voiced. Healthy speakers: 60-80%. Low values indicate frequent voicing failures.
 
+## Detection quality
+
+Each exercise may include a `detection_quality` field indicating how voiced frames were identified:
+- **pitch** (or absent): Standard pitch detection — metrics are reliable.
+- **relaxed_pitch**: Pitch detection with lowered thresholds — still real pitch measurements but noisier. Metrics are usable but less precise.
+- **energy_fallback**: Pitch detector found almost no voiced frames (very breathy voice). Voiced frames were identified by signal energy instead. Consequences:
+  - **Jitter** is zeroed (meaningless without real pitch measurements)
+  - **Voice breaks** are zeroed (energy gaps ≠ voicing gaps)
+  - **Shimmer** and **HNR** use an estimated pitch for window sizing — interpret with caution
+  - **F0 values** are estimated, not measured — do not draw conclusions about pitch
+
+When comparing sessions, flag any that used energy_fallback — their metrics are not directly comparable to pitch-detected sessions.
+
 ## Your task
 
 Interpret the data concisely. Use plain language — the patient is not a clinician. Structure your response as:
@@ -65,10 +78,14 @@ pub fn user_prompt(current: &SessionData, history: &[SessionData], trend_report:
 
     if let Some(s) = &current.analysis.sustained {
         parts.push("### Sustained vowel".into());
+        if let Some(ref dq) = s.detection_quality {
+            parts.push(format!("- **Detection: {dq}** — pitch detector struggled; metrics below use estimated pitch and should be interpreted with caution"));
+        }
         parts.push(format!("- MPT: {:.1} seconds", s.mpt_seconds));
         parts.push(format!("- Mean F0: {:.1} Hz", s.mean_f0_hz));
         parts.push(format!("- F0 std: {:.1} Hz", s.f0_std_hz));
-        parts.push(format!("- Jitter: {:.2}%", s.jitter_local_percent));
+        parts.push(format!("- Jitter: {:.2}%{}", s.jitter_local_percent,
+            if s.detection_quality.as_deref() == Some("energy_fallback") { " (zeroed — unreliable with energy fallback)" } else { "" }));
         parts.push(format!("- Shimmer: {:.2}%", s.shimmer_local_percent));
         parts.push(format!("- HNR: {:.1} dB", s.hnr_db));
         parts.push(String::new());
@@ -84,10 +101,14 @@ pub fn user_prompt(current: &SessionData, history: &[SessionData], trend_report:
 
     if let Some(s) = &current.analysis.reading {
         parts.push("### Reading passage".into());
+        if let Some(ref dq) = s.detection_quality {
+            parts.push(format!("- **Detection: {dq}** — pitch detector struggled; metrics below should be interpreted with caution"));
+        }
         parts.push(format!("- Mean F0: {:.1} Hz", s.mean_f0_hz));
         parts.push(format!("- F0 std: {:.1} Hz", s.f0_std_hz));
         parts.push(format!("- F0 range: {:.1} - {:.1} Hz", s.f0_range_hz.0, s.f0_range_hz.1));
-        parts.push(format!("- Voice breaks: {}", s.voice_breaks));
+        parts.push(format!("- Voice breaks: {}{}", s.voice_breaks,
+            if s.detection_quality.as_deref() == Some("energy_fallback") { " (zeroed — unreliable with energy fallback)" } else { "" }));
         parts.push(format!("- Voiced fraction: {:.0}%", s.voiced_fraction * 100.0));
         parts.push(String::new());
     }
@@ -109,8 +130,12 @@ pub fn user_prompt(current: &SessionData, history: &[SessionData], trend_report:
             parts.push(format!("### {}", session.date));
 
             if let Some(s) = &session.analysis.sustained {
+                let dq_tag = match s.detection_quality.as_deref() {
+                    Some(dq) => format!(" [detection: {dq}]"),
+                    None => String::new(),
+                };
                 parts.push(format!(
-                    "  Sustained: MPT={:.1}s, F0={:.1}Hz, Jitter={:.2}%, Shimmer={:.2}%, HNR={:.1}dB",
+                    "  Sustained: MPT={:.1}s, F0={:.1}Hz, Jitter={:.2}%, Shimmer={:.2}%, HNR={:.1}dB{dq_tag}",
                     s.mpt_seconds, s.mean_f0_hz, s.jitter_local_percent, s.shimmer_local_percent, s.hnr_db
                 ));
             }
@@ -123,8 +148,12 @@ pub fn user_prompt(current: &SessionData, history: &[SessionData], trend_report:
             }
 
             if let Some(s) = &session.analysis.reading {
+                let dq_tag = match s.detection_quality.as_deref() {
+                    Some(dq) => format!(" [detection: {dq}]"),
+                    None => String::new(),
+                };
                 parts.push(format!(
-                    "  Reading: F0={:.1}Hz, breaks={}, voiced={:.0}%",
+                    "  Reading: F0={:.1}Hz, breaks={}, voiced={:.0}%{dq_tag}",
                     s.mean_f0_hz, s.voice_breaks, s.voiced_fraction * 100.0
                 ));
             }
@@ -193,6 +222,7 @@ mod tests {
                     jitter_local_percent: 0.28,
                     shimmer_local_percent: 75.0,
                     hnr_db: -0.9,
+                    detection_quality: None,
                 }),
                 scale: None,
                 reading: None,

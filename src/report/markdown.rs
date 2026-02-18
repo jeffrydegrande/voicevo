@@ -25,15 +25,16 @@ pub fn generate_report(sessions: &[SessionData], config: &AppConfig) -> Result<S
 
     // Sustained vowel metrics table
     md.push_str("## Sustained Vowel Metrics\n\n");
-    md.push_str("| Date | MPT (s) | Mean F0 (Hz) | Jitter (%) | Shimmer (%) | HNR (dB) |\n");
-    md.push_str("|------|---------|-------------|-----------|------------|----------|\n");
+    md.push_str("| Date | MPT (s) | Mean F0 (Hz) | Jitter (%) | Shimmer (%) | HNR (dB) | Detection |\n");
+    md.push_str("|------|---------|-------------|-----------|------------|----------|----------|\n");
 
     let thresholds = &config.analysis.thresholds;
 
     for session in sessions {
         if let Some(ref s) = session.analysis.sustained {
+            let dq = s.detection_quality.as_deref().unwrap_or("pitch");
             md.push_str(&format!(
-                "| {} | {:.1} | {:.1} | {:.2}{} | {:.2}{} | {:.1}{} |\n",
+                "| {} | {:.1} | {:.1} | {:.2}{} | {:.2}{} | {:.1}{} | {} |\n",
                 session.date,
                 s.mpt_seconds,
                 s.mean_f0_hz,
@@ -43,6 +44,7 @@ pub fn generate_report(sessions: &[SessionData], config: &AppConfig) -> Result<S
                 flag_high(s.shimmer_local_percent, thresholds.shimmer_pathological),
                 s.hnr_db,
                 flag_low(s.hnr_db, thresholds.hnr_low),
+                dq,
             ));
         }
     }
@@ -69,18 +71,20 @@ pub fn generate_report(sessions: &[SessionData], config: &AppConfig) -> Result<S
 
     // Reading metrics table
     md.push_str("## Reading Passage Metrics\n\n");
-    md.push_str("| Date | Mean F0 (Hz) | F0 Std (Hz) | Breaks | Voiced (%) |\n");
-    md.push_str("|------|-------------|-----------|--------|----------|\n");
+    md.push_str("| Date | Mean F0 (Hz) | F0 Std (Hz) | Breaks | Voiced (%) | Detection |\n");
+    md.push_str("|------|-------------|-----------|--------|----------|----------|\n");
 
     for session in sessions {
         if let Some(ref r) = session.analysis.reading {
+            let dq = r.detection_quality.as_deref().unwrap_or("pitch");
             md.push_str(&format!(
-                "| {} | {:.1} | {:.1} | {} | {:.0} |\n",
+                "| {} | {:.1} | {:.1} | {} | {:.0} | {} |\n",
                 session.date,
                 r.mean_f0_hz,
                 r.f0_std_hz,
                 r.voice_breaks,
                 r.voiced_fraction * 100.0,
+                dq,
             ));
         }
     }
@@ -181,6 +185,7 @@ mod tests {
                     jitter_local_percent: 1.5,
                     shimmer_local_percent: 4.0,
                     hnr_db: hnr,
+                    detection_quality: None,
                 }),
                 scale: None,
                 reading: None,
