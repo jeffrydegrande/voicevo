@@ -301,6 +301,10 @@ fn draw_mpt(
         })
         .draw()?;
 
+    // Threshold lines
+    draw_horizontal_line(&mut chart, 10.0, y_min, y_max, "<10s = significant dysfunction")?;
+    draw_horizontal_line(&mut chart, 15.0, y_min, y_max, ">15s = healthy range")?;
+
     let points: Vec<(usize, f32)> = values
         .iter()
         .enumerate()
@@ -344,6 +348,10 @@ fn draw_voice_breaks(
         })
         .draw()?;
 
+    // Threshold lines: fewer is better, 0 is ideal
+    draw_horizontal_line(&mut chart, 0.0, y_min, y_max, "0 = ideal (no breaks)")?;
+    draw_horizontal_line(&mut chart, 5.0, y_min, y_max, ">5 = concerning")?;
+
     let points: Vec<(usize, f32)> = values
         .iter()
         .enumerate()
@@ -386,6 +394,10 @@ fn draw_mean_f0(
                 .unwrap_or_default()
         })
         .draw()?;
+
+    // Male normal range: 85–180 Hz
+    draw_horizontal_line(&mut chart, 85.0, y_min, y_max, "Male low (85 Hz)")?;
+    draw_horizontal_line(&mut chart, 180.0, y_min, y_max, "Male high (180 Hz)")?;
 
     let points: Vec<(usize, f32)> = values
         .iter()
