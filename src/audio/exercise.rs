@@ -16,13 +16,13 @@ use crate::storage;
 use crate::util;
 
 /// Silence threshold in dB. RMS below this is considered silence.
-const SILENCE_THRESHOLD_DB: f32 = -40.0;
+const SILENCE_THRESHOLD_DB: f32 = -50.0;
 
 /// Number of consecutive silent polls (~100ms each) before auto-stopping.
-const SILENCE_POLL_COUNT: usize = 10;
+const SILENCE_POLL_COUNT: usize = 15;
 
 /// Minimum recording duration in seconds before auto-stop can trigger.
-const MIN_DURATION_SECS: f32 = 1.0;
+const MIN_DURATION_SECS: f32 = 3.0;
 
 /// Minimum duration to attempt DSP analysis.
 const MIN_ANALYSIS_DURATION_SECS: f32 = 0.5;
@@ -218,9 +218,10 @@ fn record_with_live_feedback(
     // Main thread: poll keyboard + render timer/meter
     crossterm::terminal::enable_raw_mode()?;
 
-    // Print two placeholder lines for the timer and meter
-    print!("  Timer:  0.0s\n");
-    print!("  Volume: {}\n", " ".repeat(METER_WIDTH));
+    // Print two placeholder lines for the timer and meter.
+    // In raw mode \n is LF only (no carriage return), so use \r\n.
+    print!("  Timer:  0.0s\r\n");
+    print!("  Volume: {}\r\n", " ".repeat(METER_WIDTH));
 
     let start = Instant::now();
     let mut silent_polls: usize = 0;
@@ -278,8 +279,8 @@ fn record_with_live_feedback(
 fn render_feedback(elapsed: f32, rms_db: f32, reference_mpt: Option<f32>) {
     use std::io::Write;
 
-    // Move cursor up 2 lines
-    print!("\x1b[2A");
+    // Move cursor up 2 lines, then to column 0
+    print!("\x1b[2A\r");
 
     // Timer line
     let timer_str = if let Some(target) = reference_mpt {
@@ -287,12 +288,12 @@ fn render_feedback(elapsed: f32, rms_db: f32, reference_mpt: Option<f32>) {
     } else {
         format!("{:.1}s", elapsed)
     };
-    print!("\x1b[2K  Timer:  {timer_str}\n");
+    print!("\x1b[2K  Timer:  {timer_str}\r\n");
 
     // Volume meter: map dB to bar width
     // Range: -60 dB (silent) to 0 dB (full scale)
     let bar = build_volume_bar(rms_db);
-    print!("\x1b[2K  Volume: {bar}\n");
+    print!("\x1b[2K  Volume: {bar}\r\n");
 
     let _ = std::io::stdout().flush();
 }
