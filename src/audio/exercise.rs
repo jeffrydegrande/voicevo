@@ -72,7 +72,7 @@ pub fn run_sustain_exercise(config: &AppConfig) -> Result<()> {
     println!();
 
     // --- Phase 2: Live recording ---
-    let (samples, sample_rate, duration_secs) = record_with_live_feedback(reference_mpt)?;
+    let (samples, sample_rate, phonation_secs) = record_with_live_feedback(reference_mpt)?;
 
     println!();
     println!(
@@ -84,8 +84,8 @@ pub fn run_sustain_exercise(config: &AppConfig) -> Result<()> {
     // --- Phase 3: Post-exercise analysis ---
     let peak_db = util::peak_db(&samples);
 
-    if duration_secs < MIN_ANALYSIS_DURATION_SECS {
-        println!("  Recording too short ({:.1}s) — skipping analysis.", duration_secs);
+    if phonation_secs < MIN_ANALYSIS_DURATION_SECS {
+        println!("  Recording too short ({:.1}s) — skipping analysis.", phonation_secs);
         return Ok(());
     }
 
@@ -98,18 +98,21 @@ pub fn run_sustain_exercise(config: &AppConfig) -> Result<()> {
         return Ok(());
     }
 
+    println!(
+        "  {}",
+        style("Results").bold()
+    );
+    println!();
+
+    // MPT from the exercise timer (clinical stopwatch method)
+    print_metric("MPT", &format!("{:.1}s", phonation_secs), reference_mpt.map(|r| {
+        format_comparison(phonation_secs, r, "s", true)
+    }));
+
+    // Voice quality metrics from DSP analysis
     let pitch_config: PitchConfig = (&config.analysis).into();
     match sustained::analyze(&samples, sample_rate, &pitch_config) {
         Ok(result) => {
-            println!(
-                "  {}",
-                style("Results").bold()
-            );
-            println!();
-
-            print_metric("MPT", &format!("{:.1}s", result.mpt_seconds), reference_mpt.map(|r| {
-                format_comparison(result.mpt_seconds, r, "s", true)
-            }));
             print_metric("Mean F0", &format!("{:.1} Hz", result.mean_f0_hz), None);
             print_metric("Jitter", &format!("{:.2}%", result.jitter_local_percent),
                 Some(rate_jitter(result.jitter_local_percent, &config.analysis.thresholds)));
@@ -117,16 +120,16 @@ pub fn run_sustain_exercise(config: &AppConfig) -> Result<()> {
                 Some(rate_shimmer(result.shimmer_local_percent, &config.analysis.thresholds)));
             print_metric("HNR", &format!("{:.1} dB", result.hnr_db),
                 Some(rate_hnr(result.hnr_db, &config.analysis.thresholds)));
-
-            println!();
         }
         Err(e) => {
             println!(
-                "  {} Analysis failed: {e}",
+                "  {} Voice quality analysis failed: {e}",
                 style("NOTE").yellow().bold()
             );
         }
     }
+
+    println!();
 
     Ok(())
 }
@@ -262,17 +265,28 @@ fn record_with_live_feedback(
 
     crossterm::terminal::disable_raw_mode()?;
 
+    // Timer-based phonation duration: total elapsed minus the trailing
+    // silence that triggered the stop. This matches clinical practice
+    // (stopwatch measurement) and is more reliable than DSP pitch-contour
+    // MPT for weak or breathy voices.
+    let total_elapsed = start.elapsed().as_secs_f32();
+    let trailing_silence_secs = silent_polls as f32 * 0.1;
+    let phonation_secs = (total_elapsed - trailing_silence_secs).max(0.0);
+
     // Signal stop and clean up
     stop.store(true, Ordering::Relaxed);
     drop(stream);
 
-    let all_samples = collector_handle
+    let mut all_samples = collector_handle
         .join()
         .map_err(|_| anyhow::anyhow!("Collector thread panicked"))?;
 
-    let duration_secs = all_samples.len() as f32 / sample_rate as f32;
+    // Trim trailing silence for cleaner DSP analysis of voice quality
+    let silence_samples = (trailing_silence_secs * sample_rate as f32) as usize;
+    let trimmed_len = all_samples.len().saturating_sub(silence_samples);
+    all_samples.truncate(trimmed_len);
 
-    Ok((all_samples, sample_rate, duration_secs))
+    Ok((all_samples, sample_rate, phonation_secs))
 }
 
 /// Render the timer and volume meter lines in-place.
