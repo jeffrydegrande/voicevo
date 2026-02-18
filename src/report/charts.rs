@@ -185,8 +185,8 @@ fn draw_hnr(
         .draw()?;
 
     // Threshold lines
-    draw_horizontal_line(&mut chart, 7.0, y_min, y_max, "Low")?;
-    draw_horizontal_line(&mut chart, 20.0, y_min, y_max, "Normal")?;
+    draw_horizontal_line(&mut chart, 7.0, y_min, y_max, "<7 dB = severely breathy")?;
+    draw_horizontal_line(&mut chart, 20.0, y_min, y_max, ">20 dB = healthy voice")?;
 
     let points: Vec<(usize, f32)> = values
         .iter()
@@ -240,9 +240,9 @@ fn draw_jitter_shimmer(
         })
         .draw()?;
 
-    // Threshold lines
-    draw_horizontal_line(&mut chart, 1.04, y_min, y_max, "Jitter threshold")?;
-    draw_horizontal_line(&mut chart, 3.81, y_min, y_max, "Shimmer threshold")?;
+    // Threshold lines: values below these are normal (Praat norms)
+    draw_horizontal_line(&mut chart, 1.04, y_min, y_max, "Jitter normal limit (1.04%)")?;
+    draw_horizontal_line(&mut chart, 3.81, y_min, y_max, "Shimmer normal limit (3.81%)")?;
 
     let j_points: Vec<(usize, f32)> = jitter
         .iter()
