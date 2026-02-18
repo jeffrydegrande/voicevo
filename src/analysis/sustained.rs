@@ -5,20 +5,19 @@ use crate::storage::session_data::SustainedAnalysis;
 
 /// Analyze a sustained vowel recording.
 ///
-/// This runs the full DSP pipeline:
-///   1. Pitch tracking → F0 contour
-///   2. Jitter (pitch perturbation)
-///   3. Shimmer (amplitude perturbation)
-///   4. HNR (breathiness)
-///   5. MPT (longest continuous voicing)
-///   6. F0 statistics (mean, std)
+/// Uses three-tier pitch detection fallback for breathy voices.
+/// Jitter is only computed from real pitch measurements (tiers 1-2).
+/// Shimmer and HNR use pitch period only for window sizing, so they
+/// still produce meaningful results with estimated pitch.
 pub fn analyze(
     samples: &[f32],
     sample_rate: u32,
     pitch_config: &pitch::PitchConfig,
 ) -> Result<SustainedAnalysis> {
-    let contour = pitch::extract_pitch_contour(samples, sample_rate, pitch_config);
-    let frequencies = pitch::voiced_frequencies(&contour);
+    let result = pitch::extract_contour_with_fallback(samples, sample_rate, pitch_config);
+    let contour = &result.contour;
+
+    let frequencies = pitch::voiced_frequencies(contour);
 
     if frequencies.is_empty() {
         anyhow::bail!(
@@ -33,17 +32,31 @@ pub fn analyze(
         / frequencies.len() as f32;
     let f0_std = variance.sqrt();
 
-    // Voice quality metrics
-    let jitter_percent = jitter::local_jitter_percent(&contour).unwrap_or(0.0);
+    // Jitter requires real pitch measurements — skip when using energy fallback
+    // since all frames have the same estimated pitch (jitter would be 0%).
+    let jitter_percent = if result.used_energy_fallback {
+        0.0
+    } else {
+        jitter::local_jitter_percent(contour).unwrap_or(0.0)
+    };
+
+    // Shimmer and HNR use pitch period only for window sizing, so they
+    // still produce meaningful results with estimated pitch.
     let shimmer_percent =
-        shimmer::local_shimmer_percent(samples, sample_rate, &contour, pitch_config.hop_size_ms)
+        shimmer::local_shimmer_percent(samples, sample_rate, contour, pitch_config.hop_size_ms)
             .unwrap_or(0.0);
     let hnr_db =
-        hnr::compute_hnr_db(samples, sample_rate, &contour, pitch_config.hop_size_ms)
+        hnr::compute_hnr_db(samples, sample_rate, contour, pitch_config.hop_size_ms)
             .unwrap_or(0.0);
 
     // Maximum phonation time
-    let mpt_seconds = mpt::max_phonation_time_secs(&contour, pitch_config.hop_size_ms);
+    let mpt_seconds = mpt::max_phonation_time_secs(contour, pitch_config.hop_size_ms);
+
+    let detection_quality = if result.detection_quality == "pitch" {
+        None
+    } else {
+        Some(result.detection_quality.clone())
+    };
 
     Ok(SustainedAnalysis {
         mpt_seconds,
@@ -52,5 +65,6 @@ pub fn analyze(
         jitter_local_percent: jitter_percent,
         shimmer_local_percent: shimmer_percent,
         hnr_db,
+        detection_quality,
     })
 }

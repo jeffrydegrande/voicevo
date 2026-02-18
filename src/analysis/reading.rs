@@ -5,21 +5,19 @@ use crate::storage::session_data::ReadingAnalysis;
 
 /// Analyze a reading passage recording.
 ///
-/// The user reads a standard passage (e.g., The Rainbow Passage) at their
-/// normal speaking pace. We extract:
-///   - Mean speaking F0 and standard deviation
-///   - F0 range (5th to 95th percentile)
-///   - Voice break count
-///   - Voiced fraction (what % of the time pitch was detected)
+/// Uses three-tier pitch detection fallback for breathy voices.
+/// Voice break count is zeroed when the energy fallback is used, since
+/// gaps in an energy-based contour don't reflect real voicing gaps.
 pub fn analyze(
     samples: &[f32],
     sample_rate: u32,
     pitch_config: &pitch::PitchConfig,
 ) -> Result<ReadingAnalysis> {
-    let pitch_contour = pitch::extract_pitch_contour(samples, sample_rate, pitch_config);
+    let result = pitch::extract_contour_with_fallback(samples, sample_rate, pitch_config);
+    let pitch_contour = &result.contour;
 
-    let mut frequencies = pitch::voiced_frequencies(&pitch_contour);
-    let vf = pitch::voiced_fraction(&pitch_contour);
+    let mut frequencies = pitch::voiced_frequencies(pitch_contour);
+    let vf = pitch::voiced_fraction(pitch_contour);
 
     if frequencies.is_empty() {
         anyhow::bail!(
@@ -39,8 +37,19 @@ pub fn analyze(
     let f0_low = contour::percentile(&frequencies, 0.05);
     let f0_high = contour::percentile(&frequencies, 0.95);
 
-    // Voice breaks
-    let breaks = voice_breaks::count_voice_breaks(&pitch_contour, pitch_config.hop_size_ms);
+    // Voice breaks: unreliable with energy fallback since gaps in the
+    // energy contour reflect silence, not voicing loss.
+    let breaks = if result.used_energy_fallback {
+        0
+    } else {
+        voice_breaks::count_voice_breaks(pitch_contour, pitch_config.hop_size_ms)
+    };
+
+    let detection_quality = if result.detection_quality == "pitch" {
+        None
+    } else {
+        Some(result.detection_quality.clone())
+    };
 
     Ok(ReadingAnalysis {
         mean_f0_hz: mean_f0,
@@ -48,5 +57,6 @@ pub fn analyze(
         f0_range_hz: (f0_low, f0_high),
         voice_breaks: breaks,
         voiced_fraction: vf,
+        detection_quality,
     })
 }
