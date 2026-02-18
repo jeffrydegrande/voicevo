@@ -26,17 +26,17 @@ fn main() -> Result<()> {
 
             RecordCommand::Sustained { date } => {
                 let date = util::resolve_date(date.as_deref())?;
-                audio::recorder::record_exercise("sustained", &date)
+                audio::recorder::record_exercise("sustained", &date, &app_config)
             }
 
             RecordCommand::Scale { date } => {
                 let date = util::resolve_date(date.as_deref())?;
-                audio::recorder::record_exercise("scale", &date)
+                audio::recorder::record_exercise("scale", &date, &app_config)
             }
 
             RecordCommand::Reading { date } => {
                 let date = util::resolve_date(date.as_deref())?;
-                audio::recorder::record_exercise("reading", &date)
+                audio::recorder::record_exercise("reading", &date, &app_config)
             }
 
             RecordCommand::Session { date } => {

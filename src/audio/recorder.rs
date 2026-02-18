@@ -23,7 +23,7 @@ pub struct RecordingStats {
 
 /// Record a named exercise for a given date.
 /// Creates a new numbered attempt: {exercise}_001.wav, _002.wav, etc.
-pub fn record_exercise(exercise: &str, date: &NaiveDate) -> Result<()> {
+pub fn record_exercise(exercise: &str, date: &NaiveDate, config: &crate::config::AppConfig) -> Result<()> {
     let path = paths::next_attempt_path(date, exercise);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -45,6 +45,36 @@ pub fn record_exercise(exercise: &str, date: &NaiveDate) -> Result<()> {
         path.display()
     );
     println!();
+
+    // Show exercise-specific instructions
+    match exercise {
+        "sustained" => {
+            println!(
+                "  Take a deep breath, then hold {} as long as comfortable.",
+                style("\"AAAH\"").cyan()
+            );
+            println!();
+        }
+        "scale" => {
+            println!(
+                "  Sing from your {} comfortable note up to your {},",
+                style("lowest").cyan(),
+                style("highest").cyan()
+            );
+            println!("  then back down.");
+            println!();
+        }
+        "reading" => {
+            println!("  Read the following at your normal speaking pace:");
+            println!();
+            for line in config.session.reading_passage.lines() {
+                println!("    {}", style(line.trim()).italic());
+            }
+            println!();
+        }
+        _ => {}
+    }
+
     println!("Press {} to start recording.", style("Enter").green().bold());
 
     wait_for_enter()?;
