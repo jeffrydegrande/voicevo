@@ -398,13 +398,13 @@ fn draw_mean_f0(
     Ok(())
 }
 
-/// Draw a dashed horizontal threshold line.
+/// Draw a dashed horizontal threshold line with a right-aligned label.
 fn draw_horizontal_line(
     chart: &mut ChartContext<BitMapBackend, Cartesian2d<plotters::coord::types::RangedCoordusize, plotters::coord::types::RangedCoordf32>>,
     y_val: f32,
     y_min: f32,
     y_max: f32,
-    _label: &str,
+    label: &str,
 ) -> Result<()> {
     if y_val >= y_min && y_val <= y_max {
         chart.draw_series(DashedLineSeries::new(
@@ -413,6 +413,13 @@ fn draw_horizontal_line(
             3,
             COLOR_THRESHOLD.into(),
         ))?;
+        // Label at the left edge, slightly above the line
+        let nudge = (y_max - y_min) * 0.03;
+        chart.draw_series(std::iter::once(Text::new(
+            label.to_string(),
+            (1usize, y_val + nudge),
+            ("sans-serif", 13).into_font().color(&RGBColor(140, 140, 140)),
+        )))?;
     }
     Ok(())
 }
