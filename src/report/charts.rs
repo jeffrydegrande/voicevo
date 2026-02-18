@@ -532,6 +532,18 @@ fn draw_voice_quality(
         RGBColor(200, 255, 200).filled(),
     )))?;
 
+    // Zone labels
+    let label_font = ("sans-serif", 13).into_font().color(&RGBColor(140, 140, 140));
+    chart.draw_series(std::iter::once(Text::new(
+        "Poor", (1usize, 16.0_f32), label_font.clone(),
+    )))?;
+    chart.draw_series(std::iter::once(Text::new(
+        "Moderate", (1usize, 49.0_f32), label_font.clone(),
+    )))?;
+    chart.draw_series(std::iter::once(Text::new(
+        "Healthy", (1usize, 82.0_f32), label_font,
+    )))?;
+
     let points: Vec<(usize, f32)> = values
         .iter()
         .enumerate()
