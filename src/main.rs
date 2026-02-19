@@ -79,23 +79,43 @@ fn main() -> Result<()> {
                 return Ok(());
             }
 
-            println!("{}", style("Analyzed Sessions").bold());
+            println!("{}", style("Sessions").bold());
             println!();
             for date in &dates {
                 match storage::store::load_session(date) {
                     Ok(session) => {
-                        print!("  {}", style(date).cyan());
-                        let mut parts = Vec::new();
-                        if session.analysis.sustained.is_some() {
-                            parts.push("sustained");
+                        println!("  {}", style(date).cyan());
+
+                        let mut analyzed = Vec::new();
+                        let mut recorded = Vec::new();
+
+                        // Core exercises: can be recorded, analyzed, or both
+                        for (name, has_recording, has_analysis) in [
+                            ("sustained", session.recordings.sustained.is_some(), session.analysis.sustained.is_some()),
+                            ("scale", session.recordings.scale.is_some(), session.analysis.scale.is_some()),
+                            ("reading", session.recordings.reading.is_some(), session.analysis.reading.is_some()),
+                        ] {
+                            if has_analysis {
+                                analyzed.push(name);
+                            } else if has_recording {
+                                recorded.push(name);
+                            }
                         }
-                        if session.analysis.scale.is_some() {
-                            parts.push("scale");
+
+                        // Exercise-only analyses (no separate WAV)
+                        if session.analysis.sz.is_some() {
+                            analyzed.push("sz");
                         }
-                        if session.analysis.reading.is_some() {
-                            parts.push("reading");
+                        if session.analysis.fatigue.is_some() {
+                            analyzed.push("fatigue");
                         }
-                        println!("  [{}]", parts.join(", "));
+
+                        if !analyzed.is_empty() {
+                            println!("    analyzed: {}", style(analyzed.join(", ")).green());
+                        }
+                        if !recorded.is_empty() {
+                            println!("    recorded: {}", style(recorded.join(", ")).yellow());
+                        }
                     }
                     Err(_) => {
                         println!("  {} (corrupt)", style(date).red());
