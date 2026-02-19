@@ -1,4 +1,4 @@
-use crate::storage::session_data::SessionData;
+use crate::storage::session_data::{ReliabilityInfo, SessionData};
 
 /// The system prompt that gives the LLM medical and acoustic context.
 /// This never changes between calls — it defines the role and domain knowledge.
@@ -31,6 +31,8 @@ Recovery is gradual over months. Signs of improvement include:
 - **Jitter**: cycle-to-cycle pitch variation (%). Normal < 1.04%. Higher suggests irregular cord vibration.
 - **Shimmer**: cycle-to-cycle amplitude variation (%). Normal < 3.81%. Higher suggests inconsistent cord closure.
 - **HNR** (Harmonic-to-Noise Ratio): signal quality in dB. Normal > 20 dB. Below 7 dB is severely breathy.
+- **CPPS** (Cepstral Peak Prominence Smoothed): pitch-independent measure of voice periodicity in dB. Normal ~5-10 dB. Below 3 dB indicates significant dysphonia. Unlike HNR, CPPS remains valid even when pitch detection fails, making it especially useful for severely damaged voices.
+- **Periodicity**: mean normalized autocorrelation at the pitch period (0.0-1.0). Higher values mean more regular vocal fold vibration. Below 0.5 suggests highly aperiodic voice.
 
 ### Chromatic scale (low to high and back)
 - **Pitch floor/ceiling**: the usable range (5th-95th percentile of detected pitch)
@@ -39,21 +41,45 @@ Recovery is gradual over months. Signs of improvement include:
 ### Reading passage
 - **Mean F0**: speaking pitch during connected speech
 - **F0 std**: intonation variation (higher = more expressive)
-- **Voice breaks**: pauses in voicing between 50-500ms. These indicate moments where the cord cannot sustain vibration.
+- **Voice breaks**: pauses in voicing between 50-250ms. These indicate moments where the cord cannot sustain vibration.
 - **Voiced fraction**: percentage of speech that is actually voiced. Healthy speakers: 60-80%. Low values indicate frequent voicing failures.
+- **CPPS**: same as sustained vowel — pitch-independent periodicity metric.
 
-## Detection quality
+### S/Z ratio
+- The patient sustains /s/ (voiceless) and /z/ (voiced) as long as possible. Since /z/ requires vocal fold vibration, the ratio of /s/ duration to /z/ duration indicates glottal efficiency.
+- **Normal**: ratio close to 1.0 (both durations similar)
+- **Elevated** (>1.4): suggests glottal air leak — the vocal folds cannot maintain closure during voiced sound, so /z/ duration is disproportionately short.
 
-Each exercise may include a `detection_quality` field indicating how voiced frames were identified:
+### Vocal fatigue
+- The patient performs multiple sustained vowel trials with rest periods. We track MPT and CPPS across trials.
+- **MPT slope**: negative slope means phonation time decreases with repetition (vocal fatigue). Stable or positive slope indicates good endurance.
+- **CPPS slope**: declining CPPS across trials suggests voice quality degrades with use.
+- **Effort rating**: patient-reported strain (1-10) per trial. Increasing effort with stable MPT suggests compensatory strategies.
+
+## Detection quality and reliability
+
+Each exercise includes reliability metadata indicating how trustworthy the measurements are:
+
+### Analysis quality levels
+- **good**: Standard pitch detection worked well (dominant tier 1, >50% pitched frames). All metrics are reliable.
+- **ok**: Pitch detection needed relaxed thresholds for some frames (dominant tier 1-2, >30% pitched). Metrics are usable but less precise.
+- **trend_only**: Pitch detection largely failed (dominant tier 3, or very few pitched frames). Only useful for tracking relative changes between sessions — absolute values are unreliable.
+
+### Per-metric validity
+Each session indicates which specific metrics are trustworthy:
+- **Jitter**: requires tier 1-2 detection with >30% pitched frames
+- **Shimmer**: requires tier 1-2 detection
+- **HNR**: requires tier 1-2 detection
+- **CPPS**: always valid when computed (pitch-independent)
+- **Voice breaks**: "valid" (tier 1), "trend_only" (tier 2), or "unavailable" (tier 3)
+
+### Legacy detection_quality field
+Older sessions may show a `detection_quality` field instead:
 - **pitch** (or absent): Standard pitch detection — metrics are reliable.
-- **relaxed_pitch**: Pitch detection with lowered thresholds — still real pitch measurements but noisier. Metrics are usable but less precise.
-- **energy_fallback**: Pitch detector found almost no voiced frames (very breathy voice). Voiced frames were identified by signal energy instead. Consequences:
-  - **Jitter** is zeroed (meaningless without real pitch measurements)
-  - **Voice breaks** are zeroed (energy gaps ≠ voicing gaps)
-  - **Shimmer** and **HNR** use an estimated pitch for window sizing — interpret with caution
-  - **F0 values** are estimated, not measured — do not draw conclusions about pitch
+- **relaxed_pitch**: Lowered thresholds — usable but noisier.
+- **energy_fallback**: Pitch failed entirely — jitter zeroed, voice breaks zeroed, shimmer/HNR/F0 are estimates only.
 
-When comparing sessions, flag any that used energy_fallback — their metrics are not directly comparable to pitch-detected sessions.
+When comparing sessions, pay attention to quality levels. Do not compare a "good" session's jitter against a "trend_only" session's jitter — the latter is unreliable.
 
 ## Your task
 
@@ -78,16 +104,20 @@ pub fn user_prompt(current: &SessionData, history: &[SessionData], trend_report:
 
     if let Some(s) = &current.analysis.sustained {
         parts.push("### Sustained vowel".into());
-        if let Some(ref dq) = s.detection_quality {
-            parts.push(format!("- **Detection: {dq}** — pitch detector struggled; metrics below use estimated pitch and should be interpreted with caution"));
-        }
+        push_reliability_header(&mut parts, s.reliability.as_ref(), s.detection_quality.as_deref());
         parts.push(format!("- MPT: {:.1} seconds", s.mpt_seconds));
         parts.push(format!("- Mean F0: {:.1} Hz", s.mean_f0_hz));
         parts.push(format!("- F0 std: {:.1} Hz", s.f0_std_hz));
         parts.push(format!("- Jitter: {:.2}%{}", s.jitter_local_percent,
-            if s.detection_quality.as_deref() == Some("energy_fallback") { " (zeroed — unreliable with energy fallback)" } else { "" }));
+            jitter_caveat(s.reliability.as_ref(), s.detection_quality.as_deref())));
         parts.push(format!("- Shimmer: {:.2}%", s.shimmer_local_percent));
         parts.push(format!("- HNR: {:.1} dB", s.hnr_db));
+        if let Some(cpps) = s.cpps_db {
+            parts.push(format!("- CPPS: {:.1} dB", cpps));
+        }
+        if let Some(p) = s.periodicity_mean {
+            parts.push(format!("- Periodicity: {:.2}", p));
+        }
         parts.push(String::new());
     }
 
@@ -101,15 +131,45 @@ pub fn user_prompt(current: &SessionData, history: &[SessionData], trend_report:
 
     if let Some(s) = &current.analysis.reading {
         parts.push("### Reading passage".into());
-        if let Some(ref dq) = s.detection_quality {
-            parts.push(format!("- **Detection: {dq}** — pitch detector struggled; metrics below should be interpreted with caution"));
-        }
+        push_reliability_header(&mut parts, s.reliability.as_ref(), s.detection_quality.as_deref());
         parts.push(format!("- Mean F0: {:.1} Hz", s.mean_f0_hz));
         parts.push(format!("- F0 std: {:.1} Hz", s.f0_std_hz));
         parts.push(format!("- F0 range: {:.1} - {:.1} Hz", s.f0_range_hz.0, s.f0_range_hz.1));
         parts.push(format!("- Voice breaks: {}{}", s.voice_breaks,
-            if s.detection_quality.as_deref() == Some("energy_fallback") { " (zeroed — unreliable with energy fallback)" } else { "" }));
+            voice_breaks_caveat(s.reliability.as_ref(), s.detection_quality.as_deref())));
         parts.push(format!("- Voiced fraction: {:.0}%", s.voiced_fraction * 100.0));
+        if let Some(cpps) = s.cpps_db {
+            parts.push(format!("- CPPS: {:.1} dB", cpps));
+        }
+        parts.push(String::new());
+    }
+
+    if let Some(sz) = &current.analysis.sz {
+        parts.push("### S/Z ratio".into());
+        parts.push(format!("- Mean /s/: {:.1}s", sz.mean_s));
+        parts.push(format!("- Mean /z/: {:.1}s", sz.mean_z));
+        parts.push(format!("- S/Z ratio: {:.2}{}", sz.sz_ratio,
+            if sz.sz_ratio > 1.4 { " (elevated — possible glottal air leak)" } else { " (normal)" }));
+        parts.push(String::new());
+    }
+
+    if let Some(f) = &current.analysis.fatigue {
+        parts.push("### Vocal fatigue".into());
+        for (i, mpt) in f.mpt_per_trial.iter().enumerate() {
+            let cpps_str = f.cpps_per_trial.get(i)
+                .and_then(|c| *c)
+                .map(|c| format!(", CPPS={c:.1}dB"))
+                .unwrap_or_default();
+            parts.push(format!("- Trial {}: MPT={:.1}s{}, effort={}",
+                i + 1, mpt, cpps_str, f.effort_per_trial[i]));
+        }
+        parts.push(format!("- MPT slope: {:+.2} s/trial{}", f.mpt_slope,
+            if f.mpt_slope < -0.3 { " (declining — vocal fatigue)" }
+            else if f.mpt_slope > 0.3 { " (improving — warming up)" }
+            else { " (stable — good endurance)" }));
+        if f.cpps_slope != 0.0 {
+            parts.push(format!("- CPPS slope: {:+.2} dB/trial", f.cpps_slope));
+        }
         parts.push(String::new());
     }
 
@@ -130,13 +190,12 @@ pub fn user_prompt(current: &SessionData, history: &[SessionData], trend_report:
             parts.push(format!("### {}", session.date));
 
             if let Some(s) = &session.analysis.sustained {
-                let dq_tag = match s.detection_quality.as_deref() {
-                    Some(dq) => format!(" [detection: {dq}]"),
-                    None => String::new(),
-                };
+                let quality_tag = quality_tag(s.reliability.as_ref(), s.detection_quality.as_deref());
                 parts.push(format!(
-                    "  Sustained: MPT={:.1}s, F0={:.1}Hz, Jitter={:.2}%, Shimmer={:.2}%, HNR={:.1}dB{dq_tag}",
-                    s.mpt_seconds, s.mean_f0_hz, s.jitter_local_percent, s.shimmer_local_percent, s.hnr_db
+                    "  Sustained: MPT={:.1}s, F0={:.1}Hz, Jitter={:.2}%, Shimmer={:.2}%, HNR={:.1}dB{}{}",
+                    s.mpt_seconds, s.mean_f0_hz, s.jitter_local_percent, s.shimmer_local_percent, s.hnr_db,
+                    s.cpps_db.map(|c| format!(", CPPS={c:.1}dB")).unwrap_or_default(),
+                    quality_tag,
                 ));
             }
 
@@ -148,13 +207,26 @@ pub fn user_prompt(current: &SessionData, history: &[SessionData], trend_report:
             }
 
             if let Some(s) = &session.analysis.reading {
-                let dq_tag = match s.detection_quality.as_deref() {
-                    Some(dq) => format!(" [detection: {dq}]"),
-                    None => String::new(),
-                };
+                let quality_tag = quality_tag(s.reliability.as_ref(), s.detection_quality.as_deref());
                 parts.push(format!(
-                    "  Reading: F0={:.1}Hz, breaks={}, voiced={:.0}%{dq_tag}",
-                    s.mean_f0_hz, s.voice_breaks, s.voiced_fraction * 100.0
+                    "  Reading: F0={:.1}Hz, breaks={}, voiced={:.0}%{}{}",
+                    s.mean_f0_hz, s.voice_breaks, s.voiced_fraction * 100.0,
+                    s.cpps_db.map(|c| format!(", CPPS={c:.1}dB")).unwrap_or_default(),
+                    quality_tag,
+                ));
+            }
+
+            if let Some(sz) = &session.analysis.sz {
+                parts.push(format!(
+                    "  S/Z: ratio={:.2}, /s/={:.1}s, /z/={:.1}s",
+                    sz.sz_ratio, sz.mean_s, sz.mean_z,
+                ));
+            }
+
+            if let Some(f) = &session.analysis.fatigue {
+                parts.push(format!(
+                    "  Fatigue: MPT slope={:+.2}s/trial, CPPS slope={:+.2}dB/trial, {} trials",
+                    f.mpt_slope, f.cpps_slope, f.mpt_per_trial.len(),
                 ));
             }
 
@@ -201,6 +273,75 @@ pub fn synthesis_user_prompt(
     )
 }
 
+/// Push a reliability or detection_quality header line into the prompt parts.
+fn push_reliability_header(parts: &mut Vec<String>, rel: Option<&ReliabilityInfo>, dq: Option<&str>) {
+    if let Some(r) = rel {
+        let validity_notes: Vec<&str> = [
+            (!r.metrics_validity.jitter).then_some("jitter unreliable"),
+            (!r.metrics_validity.shimmer).then_some("shimmer unreliable"),
+            (!r.metrics_validity.hnr).then_some("HNR unreliable"),
+            (r.metrics_validity.voice_breaks != "valid").then_some("voice breaks approximate"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        let note = if validity_notes.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", validity_notes.join(", "))
+        };
+        parts.push(format!(
+            "- **Quality: {}** — {:.0}% active, {:.0}% pitched, tier {}{}",
+            r.analysis_quality,
+            r.active_fraction * 100.0,
+            r.pitched_fraction * 100.0,
+            r.dominant_tier,
+            note,
+        ));
+    } else if let Some(dq) = dq {
+        parts.push(format!("- **Detection: {dq}** — pitch detector struggled; metrics should be interpreted with caution"));
+    }
+}
+
+/// Caveat for jitter values based on reliability.
+fn jitter_caveat(rel: Option<&ReliabilityInfo>, dq: Option<&str>) -> &'static str {
+    if let Some(r) = rel {
+        if !r.metrics_validity.jitter {
+            return " (unreliable — insufficient pitched frames)";
+        }
+    } else if dq == Some("energy_fallback") {
+        return " (zeroed — unreliable with energy fallback)";
+    }
+    ""
+}
+
+/// Caveat for voice breaks based on reliability.
+fn voice_breaks_caveat(rel: Option<&ReliabilityInfo>, dq: Option<&str>) -> &'static str {
+    if let Some(r) = rel {
+        match r.metrics_validity.voice_breaks.as_str() {
+            "trend_only" => return " (approximate — trend only)",
+            "unavailable" => return " (unavailable — detection too noisy)",
+            _ => {}
+        }
+    } else if dq == Some("energy_fallback") {
+        return " (zeroed — unreliable with energy fallback)";
+    }
+    ""
+}
+
+/// Build a compact quality tag for history lines.
+fn quality_tag(rel: Option<&ReliabilityInfo>, dq: Option<&str>) -> String {
+    if let Some(r) = rel {
+        format!(" [quality: {}]", r.analysis_quality)
+    } else {
+        match dq {
+            Some(dq) => format!(" [detection: {dq}]"),
+            None => String::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,10 +363,15 @@ mod tests {
                     jitter_local_percent: 0.28,
                     shimmer_local_percent: 75.0,
                     hnr_db: -0.9,
+                    cpps_db: None,
+                    periodicity_mean: None,
                     detection_quality: None,
+                    reliability: None,
                 }),
                 scale: None,
                 reading: None,
+                sz: None,
+                fatigue: None,
             },
         }
     }

@@ -8,7 +8,7 @@ use crate::storage::session_data::SessionData;
 /// Chart dimensions
 const WIDTH: u32 = 1200;
 const PANEL_HEIGHT: u32 = 250;
-const PANELS: u32 = 7;
+const PANELS: u32 = 8;
 const TOTAL_HEIGHT: u32 = PANEL_HEIGHT * PANELS + 80; // extra for title
 
 /// Colors for chart lines/points
@@ -63,8 +63,11 @@ pub fn generate_trend_chart(sessions: &[SessionData], output_path: &Path) -> Res
     // Panel 6: Voice Breaks
     draw_voice_breaks(&panels[5], sessions, &dates, x_range.clone())?;
 
-    // Panel 7: Mean Speaking F0
-    draw_mean_f0(&panels[6], sessions, &dates, x_range)?;
+    // Panel 7: CPPS
+    draw_cpps(&panels[6], sessions, &dates, x_range.clone())?;
+
+    // Panel 8: Mean Speaking F0
+    draw_mean_f0(&panels[7], sessions, &dates, x_range)?;
 
     root.present().context("Failed to write chart PNG")?;
 
@@ -363,6 +366,83 @@ fn draw_voice_breaks(
     Ok(())
 }
 
+fn draw_cpps(
+    area: &DrawingArea<BitMapBackend, plotters::coord::Shift>,
+    sessions: &[SessionData],
+    dates: &[&str],
+    x_range: std::ops::Range<usize>,
+) -> Result<()> {
+    // Collect CPPS from sustained and reading exercises
+    let sustained_cpps: Vec<Option<f32>> = sessions
+        .iter()
+        .map(|s| s.analysis.sustained.as_ref().and_then(|a| a.cpps_db))
+        .collect();
+    let reading_cpps: Vec<Option<f32>> = sessions
+        .iter()
+        .map(|s| s.analysis.reading.as_ref().and_then(|a| a.cpps_db))
+        .collect();
+
+    let all_vals: Vec<f32> = sustained_cpps
+        .iter()
+        .chain(reading_cpps.iter())
+        .filter_map(|v| *v)
+        .collect();
+    let (y_min, y_max) = min_max_with_margin(&all_vals, 0.0, 12.0);
+
+    let mut chart = ChartBuilder::on(area)
+        .caption("CPPS (dB)", ("sans-serif", 18))
+        .margin(5)
+        .x_label_area_size(30)
+        .y_label_area_size(50)
+        .build_cartesian_2d(x_range, y_min..y_max)?;
+
+    chart
+        .configure_mesh()
+        .x_labels(8)
+        .x_label_formatter(&|x| {
+            date_labels(dates)
+                .iter()
+                .find(|(i, _)| i == x)
+                .map(|(_, l)| l.clone())
+                .unwrap_or_default()
+        })
+        .draw()?;
+
+    // Threshold lines
+    draw_horizontal_line(&mut chart, 3.0, y_min, y_max, "<3 dB = significant dysphonia")?;
+    draw_horizontal_line(&mut chart, 5.0, y_min, y_max, ">5 dB = normal voice")?;
+
+    let s_points: Vec<(usize, f32)> = sustained_cpps
+        .iter()
+        .enumerate()
+        .filter_map(|(i, v)| v.map(|f| (i, f)))
+        .collect();
+    if !s_points.is_empty() {
+        chart
+            .draw_series(LineSeries::new(s_points.iter().copied(), &COLOR_PRIMARY))?
+            .label("Sustained")
+            .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], &COLOR_PRIMARY));
+        chart.draw_series(s_points.iter().map(|&(x, y)| Circle::new((x, y), 4, COLOR_PRIMARY.filled())))?;
+    }
+
+    let r_points: Vec<(usize, f32)> = reading_cpps
+        .iter()
+        .enumerate()
+        .filter_map(|(i, v)| v.map(|f| (i, f)))
+        .collect();
+    if !r_points.is_empty() {
+        chart
+            .draw_series(LineSeries::new(r_points.iter().copied(), &COLOR_TERTIARY))?
+            .label("Reading")
+            .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], &COLOR_TERTIARY));
+        chart.draw_series(r_points.iter().map(|&(x, y)| Circle::new((x, y), 4, COLOR_TERTIARY.filled())))?;
+    }
+
+    chart.configure_series_labels().draw()?;
+
+    Ok(())
+}
+
 fn draw_mean_f0(
     area: &DrawingArea<BitMapBackend, plotters::coord::Shift>,
     sessions: &[SessionData],
@@ -471,6 +551,10 @@ fn compute_voice_quality_index(session: &SessionData) -> Option<f32> {
         scores.push(((1.0 - s.shimmer_local_percent / 50.0) * 100.0).clamp(0.0, 100.0));
         // MPT: 0s = 0, 20s = 100
         scores.push(((s.mpt_seconds / 20.0) * 100.0).clamp(0.0, 100.0));
+        // CPPS: 0 dB = 0, 10 dB = 100 (when available)
+        if let Some(cpps) = s.cpps_db {
+            scores.push(((cpps / 10.0) * 100.0).clamp(0.0, 100.0));
+        }
     }
 
     if let Some(ref r) = session.analysis.reading {

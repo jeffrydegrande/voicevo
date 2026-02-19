@@ -25,16 +25,22 @@ pub fn generate_report(sessions: &[SessionData], config: &AppConfig) -> Result<S
 
     // Sustained vowel metrics table
     md.push_str("## Sustained Vowel Metrics\n\n");
-    md.push_str("| Date | MPT (s) | Mean F0 (Hz) | Jitter (%) | Shimmer (%) | HNR (dB) | Detection |\n");
-    md.push_str("|------|---------|-------------|-----------|------------|----------|----------|\n");
+    md.push_str("| Date | MPT (s) | Mean F0 (Hz) | Jitter (%) | Shimmer (%) | HNR (dB) | CPPS (dB) | Periodicity | Quality |\n");
+    md.push_str("|------|---------|-------------|-----------|------------|----------|----------|------------|----------|\n");
 
     let thresholds = &config.analysis.thresholds;
 
     for session in sessions {
         if let Some(ref s) = session.analysis.sustained {
-            let dq = s.detection_quality.as_deref().unwrap_or("pitch");
+            let quality = s
+                .reliability
+                .as_ref()
+                .map(|r| r.analysis_quality.as_str())
+                .unwrap_or_else(|| s.detection_quality.as_deref().unwrap_or("pitch"));
+            let cpps_str = s.cpps_db.map(|c| format!("{c:.1}")).unwrap_or_else(|| "—".into());
+            let period_str = s.periodicity_mean.map(|p| format!("{p:.2}")).unwrap_or_else(|| "—".into());
             md.push_str(&format!(
-                "| {} | {:.1} | {:.1} | {:.2}{} | {:.2}{} | {:.1}{} | {} |\n",
+                "| {} | {:.1} | {:.1} | {:.2}{} | {:.2}{} | {:.1}{} | {} | {} | {} |\n",
                 session.date,
                 s.mpt_seconds,
                 s.mean_f0_hz,
@@ -44,7 +50,9 @@ pub fn generate_report(sessions: &[SessionData], config: &AppConfig) -> Result<S
                 flag_high(s.shimmer_local_percent, thresholds.shimmer_pathological),
                 s.hnr_db,
                 flag_low(s.hnr_db, thresholds.hnr_low),
-                dq,
+                cpps_str,
+                period_str,
+                quality,
             ));
         }
     }
@@ -71,24 +79,73 @@ pub fn generate_report(sessions: &[SessionData], config: &AppConfig) -> Result<S
 
     // Reading metrics table
     md.push_str("## Reading Passage Metrics\n\n");
-    md.push_str("| Date | Mean F0 (Hz) | F0 Std (Hz) | Breaks | Voiced (%) | Detection |\n");
-    md.push_str("|------|-------------|-----------|--------|----------|----------|\n");
+    md.push_str("| Date | Mean F0 (Hz) | F0 Std (Hz) | Breaks | Voiced (%) | CPPS (dB) | Quality |\n");
+    md.push_str("|------|-------------|-----------|--------|----------|----------|----------|\n");
 
     for session in sessions {
         if let Some(ref r) = session.analysis.reading {
-            let dq = r.detection_quality.as_deref().unwrap_or("pitch");
+            let quality = r
+                .reliability
+                .as_ref()
+                .map(|r| r.analysis_quality.as_str())
+                .unwrap_or_else(|| r.detection_quality.as_deref().unwrap_or("pitch"));
+            let cpps_str = r.cpps_db.map(|c| format!("{c:.1}")).unwrap_or_else(|| "—".into());
             md.push_str(&format!(
-                "| {} | {:.1} | {:.1} | {} | {:.0} | {} |\n",
+                "| {} | {:.1} | {:.1} | {} | {:.0} | {} | {} |\n",
                 session.date,
                 r.mean_f0_hz,
                 r.f0_std_hz,
                 r.voice_breaks,
                 r.voiced_fraction * 100.0,
-                dq,
+                cpps_str,
+                quality,
             ));
         }
     }
     md.push('\n');
+
+    // S/Z ratio table
+    let has_sz = sessions.iter().any(|s| s.analysis.sz.is_some());
+    if has_sz {
+        md.push_str("## S/Z Ratio\n\n");
+        md.push_str("| Date | Mean /s/ (s) | Mean /z/ (s) | S/Z Ratio |\n");
+        md.push_str("|------|-------------|-------------|----------|\n");
+
+        for session in sessions {
+            if let Some(ref sz) = session.analysis.sz {
+                md.push_str(&format!(
+                    "| {} | {:.1} | {:.1} | {:.2}{} |\n",
+                    session.date,
+                    sz.mean_s,
+                    sz.mean_z,
+                    sz.sz_ratio,
+                    if sz.sz_ratio > 1.4 { " \u{26a0}" } else { "" },
+                ));
+            }
+        }
+        md.push('\n');
+    }
+
+    // Fatigue slope table
+    let has_fatigue = sessions.iter().any(|s| s.analysis.fatigue.is_some());
+    if has_fatigue {
+        md.push_str("## Vocal Fatigue\n\n");
+        md.push_str("| Date | Trials | MPT Slope (s/trial) | CPPS Slope (dB/trial) |\n");
+        md.push_str("|------|--------|--------------------|-----------------------|\n");
+
+        for session in sessions {
+            if let Some(ref f) = session.analysis.fatigue {
+                md.push_str(&format!(
+                    "| {} | {} | {:+.2} | {:+.2} |\n",
+                    session.date,
+                    f.mpt_per_trial.len(),
+                    f.mpt_slope,
+                    f.cpps_slope,
+                ));
+            }
+        }
+        md.push('\n');
+    }
 
     // Trend interpretation
     if sessions.len() >= 2 {
@@ -130,6 +187,14 @@ pub fn generate_report(sessions: &[SessionData], config: &AppConfig) -> Result<S
                 "- **Jitter** went from {:.2}% to {:.2}% ({:+.2}%).\n",
                 f_s.jitter_local_percent, l_s.jitter_local_percent, jitter_delta,
             ));
+
+            if let (Some(f_cpps), Some(l_cpps)) = (f_s.cpps_db, l_s.cpps_db) {
+                let cpps_delta = l_cpps - f_cpps;
+                md.push_str(&format!(
+                    "- **CPPS** went from {:.1} to {:.1} dB ({:+.1} dB).\n",
+                    f_cpps, l_cpps, cpps_delta,
+                ));
+            }
         }
 
         if let (Some(ref f_sc), Some(ref l_sc)) = (&first.analysis.scale, &last.analysis.scale) {
@@ -185,10 +250,15 @@ mod tests {
                     jitter_local_percent: 1.5,
                     shimmer_local_percent: 4.0,
                     hnr_db: hnr,
+                    cpps_db: None,
+                    periodicity_mean: None,
                     detection_quality: None,
+                    reliability: None,
                 }),
                 scale: None,
                 reading: None,
+                sz: None,
+                fatigue: None,
             },
         }
     }

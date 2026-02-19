@@ -23,6 +23,10 @@ pub struct ContourResult {
     pub detection_quality: String,
     /// Whether the energy-based fallback (tier 3) was used.
     pub used_energy_fallback: bool,
+    /// Per-frame tier: 1 (standard), 2 (relaxed), or 3 (energy fallback).
+    pub frame_tiers: Vec<u8>,
+    /// Count of frames per tier: [tier1_count, tier2_count, tier3_count].
+    pub tier_counts: [usize; 3],
 }
 
 /// Configuration for pitch extraction.
@@ -159,18 +163,10 @@ pub fn extract_contour_with_fallback(
     config: &PitchConfig,
 ) -> ContourResult {
     // Tier 1: Standard pitch detection
-    let contour = extract_pitch_contour(samples, sample_rate, config);
-    let voiced_frac = voiced_fraction(&contour);
+    let tier1_contour = extract_pitch_contour(samples, sample_rate, config);
+    let voiced_frac = voiced_fraction(&tier1_contour);
 
-    if voiced_frac >= MIN_VOICED_FRACTION {
-        return ContourResult {
-            contour,
-            detection_quality: "pitch".into(),
-            used_energy_fallback: false,
-        };
-    }
-
-    // Tier 2: Retry with relaxed thresholds
+    // Tier 2: Relaxed thresholds (always computed for tier tracking)
     let relaxed = PitchConfig {
         pitch_floor_hz: config.pitch_floor_hz,
         pitch_ceiling_hz: config.pitch_ceiling_hz,
@@ -179,19 +175,48 @@ pub fn extract_contour_with_fallback(
         power_threshold: 0.01,
         clarity_threshold: 0.05,
     };
-    let relaxed_contour = extract_pitch_contour(samples, sample_rate, &relaxed);
-    let relaxed_frac = voiced_fraction(&relaxed_contour);
+    let tier2_contour = extract_pitch_contour(samples, sample_rate, &relaxed);
+    let relaxed_frac = voiced_fraction(&tier2_contour);
+
+    // Build per-frame tier tracking
+    let n_frames = tier1_contour.len();
+    let mut frame_tiers = vec![3u8; n_frames]; // default to tier 3
+    let mut tier_counts = [0usize; 3];
+
+    for i in 0..n_frames {
+        if tier1_contour[i].frequency.is_some() {
+            frame_tiers[i] = 1;
+            tier_counts[0] += 1;
+        } else if i < tier2_contour.len() && tier2_contour[i].frequency.is_some() {
+            frame_tiers[i] = 2;
+            tier_counts[1] += 1;
+        } else {
+            tier_counts[2] += 1;
+        }
+    }
+
+    if voiced_frac >= MIN_VOICED_FRACTION {
+        return ContourResult {
+            contour: tier1_contour,
+            detection_quality: "pitch".into(),
+            used_energy_fallback: false,
+            frame_tiers,
+            tier_counts,
+        };
+    }
 
     if relaxed_frac >= MIN_VOICED_FRACTION_RELAXED {
         return ContourResult {
-            contour: relaxed_contour,
+            contour: tier2_contour,
             detection_quality: "relaxed_pitch".into(),
             used_energy_fallback: false,
+            frame_tiers,
+            tier_counts,
         };
     }
 
     // Tier 3: Energy-based fallback with estimated F0
-    let frequencies = voiced_frequencies(&relaxed_contour);
+    let frequencies = voiced_frequencies(&tier2_contour);
     let estimated_f0 = if !frequencies.is_empty() {
         let mut sorted = frequencies;
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -203,10 +228,17 @@ pub fn extract_contour_with_fallback(
     let energy_contour =
         energy_based_contour(samples, sample_rate, &relaxed, estimated_f0, ENERGY_THRESHOLD_DB);
 
+    // For energy fallback, all voiced frames are tier 3
+    let n_energy = energy_contour.len();
+    let energy_tiers = vec![3u8; n_energy];
+    let energy_tier_counts = [0, 0, n_energy];
+
     ContourResult {
         contour: energy_contour,
         detection_quality: "energy_fallback".into(),
         used_energy_fallback: true,
+        frame_tiers: energy_tiers,
+        tier_counts: energy_tier_counts,
     }
 }
 

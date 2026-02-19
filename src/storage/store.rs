@@ -1,64 +1,36 @@
-use std::path::Path;
+use anyhow::Result;
 
-use anyhow::{Context, Result};
-
+use super::db;
 use super::session_data::SessionData;
-use crate::paths;
 
-/// Save session data to a JSON file.
+/// Save session data to the SQLite database at the current analysis version.
 pub fn save_session(session: &SessionData) -> Result<()> {
-    let path = paths::session_path(&session.date);
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
-    }
-
-    let json = serde_json::to_string_pretty(session)
-        .context("Failed to serialize session data")?;
-
-    std::fs::write(&path, json)
-        .with_context(|| format!("Failed to write session file: {}", path.display()))?;
-
-    Ok(())
+    let conn = db::open_db()?;
+    db::save_session(&conn, session)
 }
 
-/// Load session data from a JSON file for a given date.
+/// Load session data for a given date (latest version).
 pub fn load_session(date: &str) -> Result<SessionData> {
-    let path = paths::session_path(date);
-    load_session_from_path(&path)
+    let conn = db::open_db()?;
+    db::load_session(&conn, date)
 }
 
-/// Load session data from a specific path.
-fn load_session_from_path(path: &Path) -> Result<SessionData> {
-    let json = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read session file: {}", path.display()))?;
-
-    serde_json::from_str(&json)
-        .with_context(|| format!("Failed to parse session file: {}", path.display()))
+/// Load session data for a given date at a specific analysis version.
+pub fn load_session_version(date: &str, version: u32) -> Result<SessionData> {
+    let conn = db::open_db()?;
+    db::load_session_version(&conn, date, version)
 }
 
 /// List all session dates, sorted chronologically.
-/// Scans the sessions directory for .json files.
 pub fn list_sessions() -> Result<Vec<String>> {
-    let dir = paths::sessions_dir();
+    let conn = db::open_db()?;
+    db::list_sessions(&conn)
+}
 
-    if !dir.exists() {
-        return Ok(Vec::new());
-    }
-
-    let mut dates: Vec<String> = std::fs::read_dir(&dir)
-        .with_context(|| format!("Failed to read sessions directory: {}", dir.display()))?
-        .filter_map(|entry| {
-            let entry = entry.ok()?;
-            let name = entry.file_name().to_string_lossy().to_string();
-            // Strip .json extension to get the date
-            name.strip_suffix(".json").map(|s| s.to_string())
-        })
-        .collect();
-
-    dates.sort();
-    Ok(dates)
+/// List all analysis versions available for a given date.
+pub fn list_versions(date: &str) -> Result<Vec<u32>> {
+    let conn = db::open_db()?;
+    db::list_versions(&conn, date)
 }
 
 #[cfg(test)]
@@ -82,10 +54,15 @@ mod tests {
                     jitter_local_percent: 1.5,
                     shimmer_local_percent: 4.0,
                     hnr_db: 10.0,
+                    cpps_db: None,
+                    periodicity_mean: None,
                     detection_quality: None,
+                    reliability: None,
                 }),
                 scale: None,
                 reading: None,
+                sz: None,
+                fatigue: None,
             },
         }
     }
@@ -100,9 +77,6 @@ mod tests {
 
         let sustained = loaded.analysis.sustained.unwrap();
         assert!((sustained.mpt_seconds - 5.0).abs() < 0.01);
-
-        // Cleanup
-        let _ = std::fs::remove_file(paths::session_path("2099-01-01"));
     }
 
     #[test]
@@ -112,7 +86,7 @@ mod tests {
 
     #[test]
     fn session_path_format() {
-        let path = paths::session_path("2026-02-08");
+        let path = crate::paths::session_path("2026-02-08");
         assert!(path.ends_with("sessions/2026-02-08.json"));
     }
 }

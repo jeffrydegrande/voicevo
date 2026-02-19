@@ -1,18 +1,20 @@
 use anyhow::Result;
 
-use crate::dsp::{contour, pitch, voice_breaks};
-use crate::storage::session_data::ReadingAnalysis;
+use crate::dsp::{activity, contour, cpps, pitch, voice_breaks};
+use crate::storage::session_data::{ReliabilityInfo, ReadingAnalysis};
 
 /// Analyze a reading passage recording.
 ///
 /// Uses three-tier pitch detection fallback for breathy voices.
-/// Voice break count is zeroed when the energy fallback is used, since
-/// gaps in an energy-based contour don't reflect real voicing gaps.
+/// Energy-based activity detection runs alongside pitch detection.
 pub fn analyze(
     samples: &[f32],
     sample_rate: u32,
     pitch_config: &pitch::PitchConfig,
 ) -> Result<ReadingAnalysis> {
+    // Activity detection — ground truth for sound production
+    let activity_result = activity::detect_activity(samples, sample_rate, &activity::ActivityConfig::default());
+
     let result = pitch::extract_contour_with_fallback(samples, sample_rate, pitch_config);
     let pitch_contour = &result.contour;
 
@@ -42,8 +44,20 @@ pub fn analyze(
     let breaks = if result.used_energy_fallback {
         0
     } else {
-        voice_breaks::count_voice_breaks(pitch_contour, pitch_config.hop_size_ms)
+        voice_breaks::count_voice_breaks(pitch_contour, pitch_config.hop_size_ms, 250.0)
     };
+
+    // CPPS — pitch-independent periodicity metric
+    let cpps_db = cpps::compute_cpps(samples, sample_rate, &cpps::CppsConfig::default());
+
+    // Compute reliability info
+    let pitched_fraction = activity::voiced_quality(pitch_contour, &activity_result.active_frames);
+    let reliability = ReliabilityInfo::compute(
+        result.tier_counts,
+        activity_result.active_fraction,
+        pitched_fraction,
+        cpps_db.is_some(),
+    );
 
     let detection_quality = if result.detection_quality == "pitch" {
         None
@@ -57,6 +71,8 @@ pub fn analyze(
         f0_range_hz: (f0_low, f0_high),
         voice_breaks: breaks,
         voiced_fraction: vf,
+        cpps_db,
         detection_quality,
+        reliability: Some(reliability),
     })
 }

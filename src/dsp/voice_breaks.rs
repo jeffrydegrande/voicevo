@@ -8,11 +8,14 @@ use super::pitch::PitchFrame;
 ///
 /// We distinguish breaks from normal speech events:
 ///   < 50ms gap:  Normal unvoiced consonant (t, s, p) — not a break
-///   50–500ms:    Voice break — the cord lost vibration and restarted
-///   > 500ms:     Intentional pause (breathing, thinking) — not a break
+///   50–max_break_ms:  Voice break — the cord lost vibration and restarted
+///   > max_break_ms:   Intentional pause (breathing, thinking) — not a break
+///
+/// `max_break_ms` defaults to 250ms. This tighter threshold reduces false
+/// positives from breathing pauses that are short but intentional.
 ///
 /// Returns the number of voice breaks detected.
-pub fn count_voice_breaks(contour: &[PitchFrame], hop_size_ms: f32) -> usize {
+pub fn count_voice_breaks(contour: &[PitchFrame], hop_size_ms: f32, max_break_ms: f32) -> usize {
     let runs = contour::voiced_runs(contour);
 
     if runs.len() < 2 {
@@ -20,7 +23,7 @@ pub fn count_voice_breaks(contour: &[PitchFrame], hop_size_ms: f32) -> usize {
     }
 
     let min_gap_ms = 50.0;
-    let max_gap_ms = 500.0;
+    let max_gap_ms = max_break_ms;
 
     let mut breaks = 0;
 
@@ -71,28 +74,28 @@ mod tests {
     #[test]
     fn no_breaks_continuous_voicing() {
         let contour = make_contour(&[(100, true)], 10.0);
-        assert_eq!(count_voice_breaks(&contour, 10.0), 0);
+        assert_eq!(count_voice_breaks(&contour, 10.0, 250.0), 0);
     }
 
     #[test]
     fn one_break_80ms_gap() {
         // voiced (20 frames) → 80ms gap (8 frames) → voiced (20 frames)
         let contour = make_contour(&[(20, true), (8, false), (20, true)], 10.0);
-        assert_eq!(count_voice_breaks(&contour, 10.0), 1);
+        assert_eq!(count_voice_breaks(&contour, 10.0, 250.0), 1);
     }
 
     #[test]
     fn short_gap_not_a_break() {
         // 30ms gap (3 frames at 10ms) — normal consonant, not a break
         let contour = make_contour(&[(20, true), (3, false), (20, true)], 10.0);
-        assert_eq!(count_voice_breaks(&contour, 10.0), 0);
+        assert_eq!(count_voice_breaks(&contour, 10.0, 250.0), 0);
     }
 
     #[test]
     fn long_pause_not_a_break() {
         // 600ms gap (60 frames) — intentional pause, not a break
         let contour = make_contour(&[(20, true), (60, false), (20, true)], 10.0);
-        assert_eq!(count_voice_breaks(&contour, 10.0), 0);
+        assert_eq!(count_voice_breaks(&contour, 10.0, 250.0), 0);
     }
 
     #[test]
@@ -102,7 +105,7 @@ mod tests {
             &[(20, true), (10, false), (20, true), (20, false), (20, true)],
             10.0,
         );
-        assert_eq!(count_voice_breaks(&contour, 10.0), 2);
+        assert_eq!(count_voice_breaks(&contour, 10.0, 250.0), 2);
     }
 
     #[test]
@@ -120,6 +123,6 @@ mod tests {
             ],
             10.0,
         );
-        assert_eq!(count_voice_breaks(&contour, 10.0), 1);
+        assert_eq!(count_voice_breaks(&contour, 10.0, 250.0), 1);
     }
 }

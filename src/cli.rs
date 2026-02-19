@@ -37,6 +37,10 @@ pub enum Command {
         /// Re-analyze all sessions
         #[arg(long)]
         all: bool,
+
+        /// Store results at a specific analysis version (default: current)
+        #[arg(long)]
+        version: Option<u32>,
     },
 
     /// Generate trend reports
@@ -114,6 +118,9 @@ pub enum Command {
     /// Export all data as LLM-friendly markdown and copy to clipboard
     Dump,
 
+    /// Migrate JSON session files to SQLite database
+    Migrate,
+
     /// Show where data and config files are stored
     Paths,
 }
@@ -122,6 +129,12 @@ pub enum Command {
 pub enum ExerciseCommand {
     /// Sustained phonation: hold "AAAH" with live timer and volume meter
     Sustain,
+
+    /// S/Z ratio test: sustain /s/ then /z/ to measure glottal efficiency
+    Sz,
+
+    /// Fatigue slope: 5 sustained trials to measure vocal endurance
+    Fatigue,
 }
 
 #[derive(Subcommand)]

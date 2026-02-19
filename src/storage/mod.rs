@@ -1,2 +1,3 @@
+pub mod db;
 pub mod session_data;
 pub mod store;

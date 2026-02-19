@@ -39,6 +39,30 @@ pub fn rms_db(samples: &[f32]) -> f32 {
     }
 }
 
+/// Compute simple linear regression: y = slope * x + intercept.
+/// Returns (slope, intercept). Returns (0.0, 0.0) for fewer than 2 points.
+pub fn linear_regression(points: &[(f32, f32)]) -> (f32, f32) {
+    let n = points.len() as f32;
+    if n < 2.0 {
+        return (0.0, 0.0);
+    }
+
+    let sum_x: f32 = points.iter().map(|(x, _)| x).sum();
+    let sum_y: f32 = points.iter().map(|(_, y)| y).sum();
+    let sum_xy: f32 = points.iter().map(|(x, y)| x * y).sum();
+    let sum_x2: f32 = points.iter().map(|(x, _)| x * x).sum();
+
+    let denom = n * sum_x2 - sum_x * sum_x;
+    if denom.abs() < f32::EPSILON {
+        return (0.0, sum_y / n);
+    }
+
+    let slope = (n * sum_xy - sum_x * sum_y) / denom;
+    let intercept = (sum_y - slope * sum_x) / n;
+
+    (slope, intercept)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +129,37 @@ mod tests {
     #[test]
     fn resolve_date_invalid() {
         assert!(resolve_date(Some("not-a-date")).is_err());
+    }
+
+    #[test]
+    fn linear_regression_known_slope() {
+        // y = 2x + 1: points (0,1), (1,3), (2,5), (3,7)
+        let points = vec![(0.0, 1.0), (1.0, 3.0), (2.0, 5.0), (3.0, 7.0)];
+        let (slope, intercept) = linear_regression(&points);
+        assert!((slope - 2.0).abs() < 0.01, "Expected slope ~2.0, got {slope:.3}");
+        assert!((intercept - 1.0).abs() < 0.01, "Expected intercept ~1.0, got {intercept:.3}");
+    }
+
+    #[test]
+    fn linear_regression_flat() {
+        let points = vec![(0.0, 5.0), (1.0, 5.0), (2.0, 5.0)];
+        let (slope, _intercept) = linear_regression(&points);
+        assert!(slope.abs() < 0.01, "Expected slope ~0, got {slope:.3}");
+    }
+
+    #[test]
+    fn linear_regression_declining() {
+        // y = -1x + 10: points (0,10), (1,9), (2,8), (3,7), (4,6)
+        let points = vec![(0.0, 10.0), (1.0, 9.0), (2.0, 8.0), (3.0, 7.0), (4.0, 6.0)];
+        let (slope, intercept) = linear_regression(&points);
+        assert!((slope - (-1.0)).abs() < 0.01, "Expected slope ~-1.0, got {slope:.3}");
+        assert!((intercept - 10.0).abs() < 0.01, "Expected intercept ~10.0, got {intercept:.3}");
+    }
+
+    #[test]
+    fn linear_regression_too_few_points() {
+        let (slope, intercept) = linear_regression(&[(1.0, 2.0)]);
+        assert_eq!(slope, 0.0);
+        assert_eq!(intercept, 0.0);
     }
 }

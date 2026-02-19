@@ -80,6 +80,93 @@ pub fn local_shimmer_percent(
     Some((mean_perturbation / mean_amplitude) * 100.0)
 }
 
+/// Minimum consecutive tier-1/2 frames needed for a valid gated measurement.
+const MIN_GATED_FRAMES: usize = 15;
+/// Minimum total duration of gated frames (seconds) for a valid measurement.
+const MIN_GATED_DURATION_S: f32 = 1.5;
+
+/// Compute gated local shimmer using only tier 1/2 frames.
+///
+/// Only frames detected by standard or relaxed pitch detection (tiers 1-2)
+/// contribute. Tier 3 frames have estimated pitch and would produce
+/// unreliable amplitude windows.
+pub fn local_shimmer_percent_gated(
+    samples: &[f32],
+    sample_rate: u32,
+    contour: &[PitchFrame],
+    frame_tiers: &[u8],
+    hop_size_ms: f32,
+) -> Option<f32> {
+    if contour.len() != frame_tiers.len() {
+        return None;
+    }
+
+    let sr = sample_rate as f32;
+    let hop_samples = (hop_size_ms / 1000.0 * sr) as usize;
+
+    let mut amplitudes: Vec<f32> = Vec::new();
+    let mut perturbations: Vec<f32> = Vec::new();
+    let mut prev_amp: Option<f32> = None;
+    let mut consecutive = 0_usize;
+    let mut max_consecutive = 0_usize;
+    let mut total_gated_frames = 0_usize;
+
+    for (i, (frame, &tier)) in contour.iter().zip(frame_tiers.iter()).enumerate() {
+        match frame.frequency {
+            Some(f0) if tier <= 2 => {
+                let period_samples = (sr / f0).round() as usize;
+                let start = i * hop_samples;
+                let end = (start + period_samples).min(samples.len());
+
+                if start >= samples.len() || start >= end {
+                    prev_amp = None;
+                    consecutive = 0;
+                    continue;
+                }
+
+                let amp = samples[start..end]
+                    .iter()
+                    .fold(0.0_f32, |max, &s| max.max(s.abs()));
+
+                amplitudes.push(amp);
+                total_gated_frames += 1;
+                consecutive += 1;
+                max_consecutive = max_consecutive.max(consecutive);
+
+                if let Some(prev) = prev_amp {
+                    perturbations.push((amp - prev).abs());
+                }
+                prev_amp = Some(amp);
+            }
+            _ => {
+                prev_amp = None;
+                consecutive = 0;
+            }
+        }
+    }
+
+    if max_consecutive < MIN_GATED_FRAMES {
+        return None;
+    }
+    let total_duration_s = total_gated_frames as f32 * hop_size_ms / 1000.0;
+    if total_duration_s < MIN_GATED_DURATION_S {
+        return None;
+    }
+
+    if perturbations.is_empty() || amplitudes.is_empty() {
+        return None;
+    }
+
+    let mean_perturbation: f32 = perturbations.iter().sum::<f32>() / perturbations.len() as f32;
+    let mean_amplitude: f32 = amplitudes.iter().sum::<f32>() / amplitudes.len() as f32;
+
+    if mean_amplitude == 0.0 {
+        return None;
+    }
+
+    Some((mean_perturbation / mean_amplitude) * 100.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

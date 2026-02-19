@@ -32,6 +32,10 @@ pub struct AnalysisConfig {
     pub pitch_ceiling_hz: f32,
     pub frame_size_ms: f32,
     pub hop_size_ms: f32,
+    /// Per-exercise pitch ceiling for sustained vowel (default 500 Hz).
+    pub sustained_ceiling_hz: f32,
+    /// Per-exercise pitch ceiling for reading passage (default 600 Hz).
+    pub reading_ceiling_hz: f32,
     pub thresholds: ThresholdConfig,
 }
 
@@ -86,7 +90,28 @@ impl Default for AnalysisConfig {
             pitch_ceiling_hz: 1000.0,
             frame_size_ms: 30.0,
             hop_size_ms: 10.0,
+            sustained_ceiling_hz: 500.0,
+            reading_ceiling_hz: 600.0,
             thresholds: ThresholdConfig::default(),
+        }
+    }
+}
+
+impl AnalysisConfig {
+    /// Return a PitchConfig with the appropriate ceiling for the given exercise.
+    pub fn pitch_config_for(&self, exercise: &str) -> PitchConfig {
+        let ceiling = match exercise {
+            "sustained" => self.sustained_ceiling_hz,
+            "reading" => self.reading_ceiling_hz,
+            _ => self.pitch_ceiling_hz, // scale uses global ceiling
+        };
+
+        PitchConfig {
+            pitch_floor_hz: self.pitch_floor_hz,
+            pitch_ceiling_hz: ceiling,
+            frame_size_ms: self.frame_size_ms,
+            hop_size_ms: self.hop_size_ms,
+            ..PitchConfig::default()
         }
     }
 }
@@ -178,6 +203,27 @@ pitch_floor_hz = 40.0
         let pitch_cfg: PitchConfig = (&cfg).into();
         assert_eq!(pitch_cfg.pitch_floor_hz, 30.0);
         assert_eq!(pitch_cfg.hop_size_ms, 10.0);
+    }
+
+    #[test]
+    fn pitch_config_for_sustained() {
+        let cfg = AnalysisConfig::default();
+        let pitch = cfg.pitch_config_for("sustained");
+        assert_eq!(pitch.pitch_ceiling_hz, 500.0);
+    }
+
+    #[test]
+    fn pitch_config_for_reading() {
+        let cfg = AnalysisConfig::default();
+        let pitch = cfg.pitch_config_for("reading");
+        assert_eq!(pitch.pitch_ceiling_hz, 600.0);
+    }
+
+    #[test]
+    fn pitch_config_for_scale() {
+        let cfg = AnalysisConfig::default();
+        let pitch = cfg.pitch_config_for("scale");
+        assert_eq!(pitch.pitch_ceiling_hz, 1000.0);
     }
 
     #[test]

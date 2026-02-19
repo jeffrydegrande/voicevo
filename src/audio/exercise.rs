@@ -120,6 +120,10 @@ pub fn run_sustain_exercise(config: &AppConfig) -> Result<()> {
                 Some(rate_shimmer(result.shimmer_local_percent, &config.analysis.thresholds)));
             print_metric("HNR", &format!("{:.1} dB", result.hnr_db),
                 Some(rate_hnr(result.hnr_db, &config.analysis.thresholds)));
+            if let Some(cpps) = result.cpps_db {
+                print_metric("CPPS", &format!("{:.1} dB", cpps),
+                    Some(rate_cpps(cpps)));
+            }
         }
         Err(e) => {
             println!(
@@ -412,6 +416,17 @@ fn rate_shimmer(shimmer: f32, thresholds: &crate::config::ThresholdConfig) -> St
         style("normal").green().to_string()
     } else {
         style("elevated").yellow().to_string()
+    }
+}
+
+/// Rate CPPS quality. Normal ~5-10 dB, < 3 dB = significant dysphonia.
+fn rate_cpps(cpps: f32) -> String {
+    if cpps >= 5.0 {
+        style("normal").green().to_string()
+    } else if cpps >= 3.0 {
+        style("mild dysphonia").yellow().to_string()
+    } else {
+        style("significant dysphonia").red().to_string()
     }
 }
 

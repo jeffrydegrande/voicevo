@@ -1,7 +1,9 @@
 pub mod devices;
 pub mod exercise;
+pub mod fatigue_exercise;
 pub mod mic_check;
 pub mod playback;
 pub mod recorder;
 pub mod session;
+pub mod sz_exercise;
 pub mod wav;

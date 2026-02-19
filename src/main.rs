@@ -49,7 +49,7 @@ fn main() -> Result<()> {
             audio::playback::play(&target, exercise.as_deref())
         }
 
-        Command::Analyze { date, all } => {
+        Command::Analyze { date, all, version: _version } => {
             if all {
                 let dates = find_recording_dates()?;
                 if dates.is_empty() {
@@ -236,6 +236,8 @@ fn main() -> Result<()> {
 
         Command::Exercise { exercise } => match exercise {
             ExerciseCommand::Sustain => audio::exercise::run_sustain_exercise(&app_config),
+            ExerciseCommand::Sz => audio::sz_exercise::run_sz_exercise(&app_config),
+            ExerciseCommand::Fatigue => audio::fatigue_exercise::run_fatigue_exercise(&app_config),
         },
 
         Command::Discard { exercise, date } => {
@@ -347,11 +349,28 @@ fn main() -> Result<()> {
             Ok(())
         }
 
+        Command::Migrate => {
+            let conn = storage::db::open_db()?;
+            let count = storage::db::migrate_json_sessions(&conn)?;
+            if count == 0 {
+                println!("No new sessions to migrate (already up to date or no JSON files found).");
+            } else {
+                println!(
+                    "Migrated {} session{}.",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                );
+            }
+            println!("Database: {}", style(paths::db_path().display()).green());
+            Ok(())
+        }
+
         Command::Paths => {
             println!("{}", style("voicevo paths").bold());
             println!();
             println!("  Config:     {}", style(paths::config_dir().display()).cyan());
             println!("  Data:       {}", style(paths::data_dir().display()).cyan());
+            println!("  Database:   {}", style(paths::db_path().display()).cyan());
             println!("  Recordings: {}", style(paths::recordings_dir().display()).cyan());
             println!("  Sessions:   {}", style(paths::sessions_dir().display()).cyan());
             println!("  Reports:    {}", style(paths::reports_dir().display()).cyan());

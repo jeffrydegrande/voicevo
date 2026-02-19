@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+/// Analysis pipeline version. Bump when the DSP pipeline changes fundamentally.
+/// v2: tighter bridge thresholds, gated jitter/shimmer, periodicity score,
+///     CPPS, per-exercise pitch ceilings, reliability metadata.
+pub const ANALYSIS_VERSION: u32 = 2;
+
 /// Complete session data for one recording date.
 ///
 /// The `#[derive(Serialize, Deserialize)]` macro auto-generates code
@@ -28,6 +33,87 @@ pub struct SessionAnalysis {
     pub sustained: Option<SustainedAnalysis>,
     pub scale: Option<ScaleAnalysis>,
     pub reading: Option<ReadingAnalysis>,
+    /// S/Z ratio exercise (glottal efficiency test).
+    #[serde(default)]
+    pub sz: Option<SzAnalysis>,
+    /// Fatigue slope exercise (endurance test).
+    #[serde(default)]
+    pub fatigue: Option<FatigueAnalysis>,
+}
+
+/// Which metrics are trustworthy given the detection quality.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricsValidity {
+    pub jitter: bool,
+    pub shimmer: bool,
+    pub hnr: bool,
+    pub cpps: bool,
+    /// "valid", "trend_only", or "unavailable"
+    pub voice_breaks: String,
+}
+
+/// Richer reliability metadata replacing the flat detection_quality string.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReliabilityInfo {
+    /// Fraction of frames with energy above the activity threshold.
+    pub active_fraction: f32,
+    /// Fraction of active frames that have pitch (pitched / active).
+    pub pitched_fraction: f32,
+    /// Which detection tier dominated: 1 (standard), 2 (relaxed), 3 (energy).
+    pub dominant_tier: u8,
+    /// Overall quality: "good", "ok", or "trend_only".
+    pub analysis_quality: String,
+    /// Per-metric validity flags.
+    pub metrics_validity: MetricsValidity,
+}
+
+impl ReliabilityInfo {
+    /// Compute reliability from tier counts and activity data.
+    pub fn compute(
+        tier_counts: [usize; 3],
+        active_fraction: f32,
+        pitched_fraction: f32,
+        has_cpps: bool,
+    ) -> Self {
+        let dominant_tier = if tier_counts[0] >= tier_counts[1] && tier_counts[0] >= tier_counts[2] {
+            1
+        } else if tier_counts[1] >= tier_counts[2] {
+            2
+        } else {
+            3
+        };
+
+        let analysis_quality = if dominant_tier == 1 && pitched_fraction > 0.5 {
+            "good"
+        } else if dominant_tier <= 2 && pitched_fraction > 0.3 {
+            "ok"
+        } else {
+            "trend_only"
+        }
+        .to_string();
+
+        let metrics_validity = MetricsValidity {
+            jitter: dominant_tier <= 2 && pitched_fraction > 0.3,
+            shimmer: dominant_tier <= 2,
+            hnr: dominant_tier <= 2,
+            cpps: has_cpps,
+            voice_breaks: if dominant_tier == 1 {
+                "valid".to_string()
+            } else if dominant_tier == 2 {
+                "trend_only".to_string()
+            } else {
+                "unavailable".to_string()
+            },
+        };
+
+        Self {
+            active_fraction,
+            pitched_fraction,
+            dominant_tier,
+            analysis_quality,
+            metrics_validity,
+        }
+    }
 }
 
 /// Analysis of the sustained vowel ("AAAH") recording.
@@ -45,11 +131,22 @@ pub struct SustainedAnalysis {
     pub shimmer_local_percent: f32,
     /// Harmonic-to-noise ratio in decibels
     pub hnr_db: f32,
+    /// Cepstral Peak Prominence Smoothed — pitch-independent periodicity metric.
+    /// Normal ~5-10 dB, < 3 dB = significant dysphonia.
+    #[serde(default)]
+    pub cpps_db: Option<f32>,
     /// How voiced frames were detected: "pitch" (normal), "relaxed_pitch"
     /// (lower thresholds), or "energy_fallback" (RMS-based, pitch estimated).
     /// When "energy_fallback", jitter is zeroed and shimmer/HNR use estimated pitch.
     #[serde(default)]
     pub detection_quality: Option<String>,
+    /// Mean periodicity score (0.0-1.0) across voiced active frames.
+    /// Based on normalized autocorrelation at the pitch period.
+    #[serde(default)]
+    pub periodicity_mean: Option<f32>,
+    /// Rich reliability metadata. Replaces detection_quality for new analyses.
+    #[serde(default)]
+    pub reliability: Option<ReliabilityInfo>,
 }
 
 /// Analysis of the chromatic scale recording.
@@ -78,10 +175,54 @@ pub struct ReadingAnalysis {
     pub voice_breaks: usize,
     /// Fraction of frames that are voiced (0.0 to 1.0)
     pub voiced_fraction: f32,
+    /// Cepstral Peak Prominence Smoothed — pitch-independent periodicity metric.
+    #[serde(default)]
+    pub cpps_db: Option<f32>,
     /// How voiced frames were detected. See SustainedAnalysis::detection_quality.
     /// When "energy_fallback", voice_breaks is zeroed.
     #[serde(default)]
     pub detection_quality: Option<String>,
+    /// Rich reliability metadata.
+    #[serde(default)]
+    pub reliability: Option<ReliabilityInfo>,
+}
+
+/// S/Z ratio analysis — glottal efficiency test.
+///
+/// The patient sustains /s/ (voiceless fricative) and /z/ (voiced fricative)
+/// multiple times. The ratio of S duration to Z duration indicates glottal
+/// competence: a ratio > 1.4 suggests air leak through the glottal gap.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SzAnalysis {
+    /// Durations of each /s/ trial in seconds.
+    pub s_durations: Vec<f32>,
+    /// Durations of each /z/ trial in seconds.
+    pub z_durations: Vec<f32>,
+    /// Mean /s/ duration.
+    pub mean_s: f32,
+    /// Mean /z/ duration.
+    pub mean_z: f32,
+    /// S/Z ratio. Normal ~1.0. Above 1.4 is concerning.
+    pub sz_ratio: f32,
+}
+
+/// Fatigue slope analysis — vocal endurance test.
+///
+/// The patient performs multiple sustained vowel trials with rest periods.
+/// Declining MPT or CPPS across trials indicates vocal fatigue (the cords
+/// tire and can't maintain closure as long).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FatigueAnalysis {
+    /// MPT for each trial in seconds.
+    pub mpt_per_trial: Vec<f32>,
+    /// CPPS for each trial in dB (if computable).
+    pub cpps_per_trial: Vec<Option<f32>>,
+    /// Subjective effort rating per trial (1-10, patient-reported).
+    pub effort_per_trial: Vec<u8>,
+    /// Slope of MPT across trials (negative = fatiguing).
+    pub mpt_slope: f32,
+    /// Slope of CPPS across trials (negative = fatiguing).
+    pub cpps_slope: f32,
 }
 
 #[cfg(test)]
@@ -105,7 +246,10 @@ mod tests {
                     jitter_local_percent: 2.1,
                     shimmer_local_percent: 5.8,
                     hnr_db: 12.3,
+                    cpps_db: Some(6.5),
+                    periodicity_mean: None,
                     detection_quality: None,
+                    reliability: None,
                 }),
                 scale: Some(ScaleAnalysis {
                     pitch_floor_hz: 42.0,
@@ -114,6 +258,8 @@ mod tests {
                     range_semitones: 25.5,
                 }),
                 reading: None,
+                sz: None,
+                fatigue: None,
             },
         };
 
@@ -130,5 +276,45 @@ mod tests {
         let sustained = loaded.analysis.sustained.unwrap();
         assert!((sustained.mpt_seconds - 8.3).abs() < 0.01);
         assert!((sustained.hnr_db - 12.3).abs() < 0.01);
+    }
+
+    #[test]
+    fn reliability_good_quality() {
+        let r = ReliabilityInfo::compute([80, 10, 10], 0.9, 0.7, true);
+        assert_eq!(r.dominant_tier, 1);
+        assert_eq!(r.analysis_quality, "good");
+        assert!(r.metrics_validity.jitter);
+        assert!(r.metrics_validity.cpps);
+        assert_eq!(r.metrics_validity.voice_breaks, "valid");
+    }
+
+    #[test]
+    fn reliability_ok_quality() {
+        let r = ReliabilityInfo::compute([20, 60, 20], 0.8, 0.4, true);
+        assert_eq!(r.dominant_tier, 2);
+        assert_eq!(r.analysis_quality, "ok");
+        assert!(r.metrics_validity.jitter);
+        assert_eq!(r.metrics_validity.voice_breaks, "trend_only");
+    }
+
+    #[test]
+    fn reliability_trend_only() {
+        let r = ReliabilityInfo::compute([5, 5, 90], 0.7, 0.1, false);
+        assert_eq!(r.dominant_tier, 3);
+        assert_eq!(r.analysis_quality, "trend_only");
+        assert!(!r.metrics_validity.jitter);
+        assert!(!r.metrics_validity.cpps);
+        assert_eq!(r.metrics_validity.voice_breaks, "unavailable");
+    }
+
+    #[test]
+    fn reliability_backward_compat() {
+        // Old JSON without reliability field should deserialize to None
+        let json = r#"{"mpt_seconds":5.0,"mean_f0_hz":100.0,"f0_std_hz":2.0,
+            "jitter_local_percent":1.0,"shimmer_local_percent":3.0,"hnr_db":10.0}"#;
+        let s: SustainedAnalysis = serde_json::from_str(json).unwrap();
+        assert!(s.reliability.is_none());
+        assert!(s.cpps_db.is_none());
+        assert!(s.detection_quality.is_none());
     }
 }

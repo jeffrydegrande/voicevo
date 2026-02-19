@@ -91,7 +91,7 @@ pub fn compute_hnr_db(
 /// This compares the signal with a shifted copy of itself.
 /// A value of 1.0 means the signal is perfectly periodic at this lag.
 /// A value of 0.0 means no correlation (random noise).
-fn normalized_autocorrelation(signal: &[f32], lag: usize) -> f32 {
+pub(crate) fn normalized_autocorrelation(signal: &[f32], lag: usize) -> f32 {
     if lag >= signal.len() {
         return 0.0;
     }

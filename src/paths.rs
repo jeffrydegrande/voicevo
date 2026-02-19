@@ -55,6 +55,11 @@ pub fn reports_dir() -> PathBuf {
     data_dir().join("reports")
 }
 
+/// Database path: <data_dir>/voicevo.db
+pub fn db_path() -> PathBuf {
+    data_dir().join("voicevo.db")
+}
+
 /// List all attempt files for an exercise on a date, sorted ascending.
 /// Includes old-format `{exercise}.wav` (as lowest priority) then numbered
 /// files `{exercise}_001.wav`, `{exercise}_002.wav`, etc.

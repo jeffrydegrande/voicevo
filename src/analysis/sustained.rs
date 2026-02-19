@@ -1,19 +1,21 @@
 use anyhow::Result;
 
-use crate::dsp::{hnr, jitter, mpt, pitch, shimmer};
-use crate::storage::session_data::SustainedAnalysis;
+use crate::dsp::{activity, cpps, hnr, jitter, mpt, periodicity, pitch, shimmer};
+use crate::storage::session_data::{ReliabilityInfo, SustainedAnalysis};
 
 /// Analyze a sustained vowel recording.
 ///
 /// Uses three-tier pitch detection fallback for breathy voices.
-/// Jitter is only computed from real pitch measurements (tiers 1-2).
-/// Shimmer and HNR use pitch period only for window sizing, so they
-/// still produce meaningful results with estimated pitch.
+/// Energy-based activity detection runs alongside pitch detection to
+/// establish ground truth for "is the patient making sound?"
 pub fn analyze(
     samples: &[f32],
     sample_rate: u32,
     pitch_config: &pitch::PitchConfig,
 ) -> Result<SustainedAnalysis> {
+    // Activity detection — ground truth for sound production
+    let activity_result = activity::detect_activity(samples, sample_rate, &activity::ActivityConfig::default());
+
     let result = pitch::extract_contour_with_fallback(samples, sample_rate, pitch_config);
     let contour = &result.contour;
 
@@ -32,25 +34,48 @@ pub fn analyze(
         / frequencies.len() as f32;
     let f0_std = variance.sqrt();
 
-    // Jitter requires real pitch measurements — skip when using energy fallback
-    // since all frames have the same estimated pitch (jitter would be 0%).
+    // Prefer gated jitter/shimmer (tier 1/2 frames only) for more accurate
+    // measurements. Fall back to ungated if insufficient high-quality data.
     let jitter_percent = if result.used_energy_fallback {
         0.0
     } else {
-        jitter::local_jitter_percent(contour).unwrap_or(0.0)
+        jitter::local_jitter_percent_gated(contour, &result.frame_tiers, pitch_config.hop_size_ms)
+            .or_else(|| jitter::local_jitter_percent(contour))
+            .unwrap_or(0.0)
     };
 
-    // Shimmer and HNR use pitch period only for window sizing, so they
-    // still produce meaningful results with estimated pitch.
-    let shimmer_percent =
+    let shimmer_percent = if result.used_energy_fallback {
         shimmer::local_shimmer_percent(samples, sample_rate, contour, pitch_config.hop_size_ms)
-            .unwrap_or(0.0);
+            .unwrap_or(0.0)
+    } else {
+        shimmer::local_shimmer_percent_gated(samples, sample_rate, contour, &result.frame_tiers, pitch_config.hop_size_ms)
+            .or_else(|| shimmer::local_shimmer_percent(samples, sample_rate, contour, pitch_config.hop_size_ms))
+            .unwrap_or(0.0)
+    };
+
     let hnr_db =
         hnr::compute_hnr_db(samples, sample_rate, contour, pitch_config.hop_size_ms)
             .unwrap_or(0.0);
 
     // Maximum phonation time
-    let mpt_seconds = mpt::max_phonation_time_secs(contour, pitch_config.hop_size_ms);
+    let mpt_seconds = mpt::max_phonation_time_secs(contour, pitch_config.hop_size_ms, 250.0);
+
+    // CPPS — pitch-independent periodicity metric
+    let cpps_db = cpps::compute_cpps(samples, sample_rate, &cpps::CppsConfig::default());
+
+    // Periodicity score — mean normalized autocorrelation
+    let periodicity_mean = periodicity::compute_periodicity(
+        samples, sample_rate, contour, &activity_result.active_frames, pitch_config.hop_size_ms,
+    );
+
+    // Compute reliability info
+    let pitched_fraction = activity::voiced_quality(contour, &activity_result.active_frames);
+    let reliability = ReliabilityInfo::compute(
+        result.tier_counts,
+        activity_result.active_fraction,
+        pitched_fraction,
+        cpps_db.is_some(),
+    );
 
     let detection_quality = if result.detection_quality == "pitch" {
         None
@@ -65,6 +90,9 @@ pub fn analyze(
         jitter_local_percent: jitter_percent,
         shimmer_local_percent: shimmer_percent,
         hnr_db,
+        cpps_db,
+        periodicity_mean,
         detection_quality,
+        reliability: Some(reliability),
     })
 }

@@ -1,7 +1,10 @@
+pub mod activity;
 pub mod contour;
+pub mod cpps;
 pub mod hnr;
 pub mod jitter;
 pub mod mpt;
+pub mod periodicity;
 pub mod pitch;
 pub mod shimmer;
 pub mod voice_breaks;

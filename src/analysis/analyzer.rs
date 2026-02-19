@@ -5,7 +5,6 @@ use console::style;
 
 use crate::audio::wav;
 use crate::config::AppConfig;
-use crate::dsp::pitch::PitchConfig;
 use crate::paths;
 use crate::storage::session_data::*;
 use crate::storage::store;
@@ -17,7 +16,9 @@ use crate::util;
 /// It loads each WAV file, runs the appropriate analysis pipeline, collects
 /// the results into a SessionData, and saves it as JSON.
 pub fn analyze_session(date: &str, app_config: &AppConfig) -> Result<SessionData> {
-    let pitch_config: PitchConfig = (&app_config.analysis).into();
+    let sustained_pitch = app_config.analysis.pitch_config_for("sustained");
+    let scale_pitch = app_config.analysis.pitch_config_for("scale");
+    let reading_pitch = app_config.analysis.pitch_config_for("reading");
 
     println!(
         "Analyzing session {}...",
@@ -42,7 +43,7 @@ pub fn analyze_session(date: &str, app_config: &AppConfig) -> Result<SessionData
             "Sustained vowel",
             p,
             |samples, sr| {
-                let result = super::sustained::analyze(samples, sr, &pitch_config)?;
+                let result = super::sustained::analyze(samples, sr, &sustained_pitch)?;
                 print_sustained_results(&result, thresholds);
                 Ok(result)
             },
@@ -57,7 +58,7 @@ pub fn analyze_session(date: &str, app_config: &AppConfig) -> Result<SessionData
             "Chromatic scale",
             p,
             |samples, sr| {
-                let result = super::scale::analyze(samples, sr, &pitch_config)?;
+                let result = super::scale::analyze(samples, sr, &scale_pitch)?;
                 print_scale_results(&result);
                 Ok(result)
             },
@@ -72,7 +73,7 @@ pub fn analyze_session(date: &str, app_config: &AppConfig) -> Result<SessionData
             "Reading passage",
             p,
             |samples, sr| {
-                let result = super::reading::analyze(samples, sr, &pitch_config)?;
+                let result = super::reading::analyze(samples, sr, &reading_pitch)?;
                 print_reading_results(&result);
                 Ok(result)
             },
@@ -93,16 +94,17 @@ pub fn analyze_session(date: &str, app_config: &AppConfig) -> Result<SessionData
             sustained,
             scale,
             reading,
+            sz: None,
+            fatigue: None,
         },
     };
 
     // Save results
     store::save_session(&session)?;
-    let save_path = crate::paths::session_path(date);
     println!();
     println!(
         "Results saved to {}",
-        style(save_path.display()).green()
+        style(crate::paths::db_path().display()).green()
     );
 
     Ok(session)
@@ -154,6 +156,25 @@ fn print_sustained_results(r: &SustainedAnalysis, t: &crate::config::ThresholdCo
         r.hnr_db,
         hnr_label(r.hnr_db, t)
     );
+    if let Some(cpps) = r.cpps_db {
+        println!(
+            "     CPPS:     {:.1} dB {}",
+            cpps,
+            cpps_label(cpps)
+        );
+    }
+    if let Some(p) = r.periodicity_mean {
+        println!("     Periodicity: {:.2}", p);
+    }
+    if let Some(ref rel) = r.reliability {
+        println!(
+            "     Quality:  {} (active {:.0}%, pitched {:.0}%, tier {})",
+            style(&rel.analysis_quality).cyan(),
+            rel.active_fraction * 100.0,
+            rel.pitched_fraction * 100.0,
+            rel.dominant_tier,
+        );
+    }
 }
 
 fn print_scale_results(r: &ScaleAnalysis) {
@@ -171,6 +192,22 @@ fn print_reading_results(r: &ReadingAnalysis) {
     );
     println!("     Breaks:     {}", r.voice_breaks);
     println!("     Voiced:     {:.0}%", r.voiced_fraction * 100.0);
+    if let Some(cpps) = r.cpps_db {
+        println!(
+            "     CPPS:       {:.1} dB {}",
+            cpps,
+            cpps_label(cpps)
+        );
+    }
+    if let Some(ref rel) = r.reliability {
+        println!(
+            "     Quality:    {} (active {:.0}%, pitched {:.0}%, tier {})",
+            style(&rel.analysis_quality).cyan(),
+            rel.active_fraction * 100.0,
+            rel.pitched_fraction * 100.0,
+            rel.dominant_tier,
+        );
+    }
 }
 
 /// Format a label for metrics where lower is better (jitter, shimmer).
@@ -179,6 +216,17 @@ fn threshold_label(value: f32, threshold: f32) -> String {
         format!("{}", style("(normal)").green())
     } else {
         format!("{}", style("(elevated)").yellow())
+    }
+}
+
+/// Format a label for CPPS. Normal ~5-10 dB, < 3 dB = significant dysphonia.
+fn cpps_label(cpps: f32) -> String {
+    if cpps >= 5.0 {
+        format!("{}", style("(normal)").green())
+    } else if cpps >= 3.0 {
+        format!("{}", style("(mild dysphonia)").yellow())
+    } else {
+        format!("{}", style("(significant dysphonia)").red())
     }
 }
 

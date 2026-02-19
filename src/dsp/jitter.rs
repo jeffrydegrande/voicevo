@@ -1,5 +1,10 @@
 use super::pitch::PitchFrame;
 
+/// Minimum consecutive tier-1/2 frames needed for a valid gated measurement.
+const MIN_GATED_FRAMES: usize = 15;
+/// Minimum total duration of gated frames (seconds) for a valid measurement.
+const MIN_GATED_DURATION_S: f32 = 1.5;
+
 /// Compute local jitter from a pitch contour.
 ///
 /// Jitter measures how much the pitch period (1/F0) varies from one cycle
@@ -47,6 +52,77 @@ pub fn local_jitter_percent(contour: &[PitchFrame]) -> Option<f32> {
                 prev_period = None;
             }
         }
+    }
+
+    if perturbations.is_empty() || periods.is_empty() {
+        return None;
+    }
+
+    let mean_perturbation: f32 = perturbations.iter().sum::<f32>() / perturbations.len() as f32;
+    let mean_period: f32 = periods.iter().sum::<f32>() / periods.len() as f32;
+
+    if mean_period == 0.0 {
+        return None;
+    }
+
+    Some((mean_perturbation / mean_period) * 100.0)
+}
+
+/// Compute gated local jitter using only tier 1/2 frames.
+///
+/// Only frames detected by standard or relaxed pitch detection (tiers 1-2)
+/// are used. Tier 3 (energy fallback) frames have estimated pitch and would
+/// produce meaningless jitter values.
+///
+/// Requires at least `MIN_GATED_FRAMES` consecutive tier-1/2 frames and
+/// `MIN_GATED_DURATION_S` total tier-1/2 duration. Returns None if
+/// insufficient high-quality data is available.
+pub fn local_jitter_percent_gated(
+    contour: &[PitchFrame],
+    frame_tiers: &[u8],
+    hop_size_ms: f32,
+) -> Option<f32> {
+    if contour.len() != frame_tiers.len() {
+        return None;
+    }
+
+    // Build a filtered contour: only keep tier 1/2 voiced frames,
+    // treat tier 3 or unvoiced as gaps.
+    let mut periods: Vec<f32> = Vec::new();
+    let mut perturbations: Vec<f32> = Vec::new();
+    let mut prev_period: Option<f32> = None;
+    let mut consecutive = 0_usize;
+    let mut max_consecutive = 0_usize;
+    let mut total_gated_frames = 0_usize;
+
+    for (frame, &tier) in contour.iter().zip(frame_tiers.iter()) {
+        match frame.frequency {
+            Some(f0) if tier <= 2 => {
+                let period = 1.0 / f0;
+                periods.push(period);
+                total_gated_frames += 1;
+                consecutive += 1;
+                max_consecutive = max_consecutive.max(consecutive);
+
+                if let Some(prev) = prev_period {
+                    perturbations.push((period - prev).abs());
+                }
+                prev_period = Some(period);
+            }
+            _ => {
+                prev_period = None;
+                consecutive = 0;
+            }
+        }
+    }
+
+    // Check minimum data requirements
+    if max_consecutive < MIN_GATED_FRAMES {
+        return None;
+    }
+    let total_duration_s = total_gated_frames as f32 * hop_size_ms / 1000.0;
+    if total_duration_s < MIN_GATED_DURATION_S {
+        return None;
     }
 
     if perturbations.is_empty() || periods.is_empty() {
@@ -139,5 +215,44 @@ mod tests {
     fn all_unvoiced() {
         let contour = vec![frame(0.0, None), frame(0.01, None)];
         assert!(local_jitter_percent(&contour).is_none());
+    }
+
+    #[test]
+    fn gated_sufficient_tier1_data() {
+        // 200 tier-1 frames at 100 Hz = 2s at 10ms hop
+        let contour: Vec<_> = (0..200)
+            .map(|i| frame(i as f32 * 0.01, Some(100.0)))
+            .collect();
+        let tiers = vec![1u8; 200];
+
+        let jitter = local_jitter_percent_gated(&contour, &tiers, 10.0).unwrap();
+        assert!(jitter < 0.001, "Perfect signal should have ~0% gated jitter, got {jitter:.4}%");
+    }
+
+    #[test]
+    fn gated_rejects_tier3_frames() {
+        // 200 frames all tier 3 — should fail
+        let contour: Vec<_> = (0..200)
+            .map(|i| frame(i as f32 * 0.01, Some(100.0)))
+            .collect();
+        let tiers = vec![3u8; 200];
+
+        assert!(local_jitter_percent_gated(&contour, &tiers, 10.0).is_none());
+    }
+
+    #[test]
+    fn gated_insufficient_consecutive() {
+        // 10 tier-1, then 10 tier-3, then 10 tier-1... never reaching 15 consecutive
+        let mut contour = Vec::new();
+        let mut tiers = Vec::new();
+        for chunk in 0..20 {
+            for i in 0..10 {
+                let idx = chunk * 10 + i;
+                contour.push(frame(idx as f32 * 0.01, Some(100.0)));
+                tiers.push(if chunk % 2 == 0 { 1 } else { 3 });
+            }
+        }
+
+        assert!(local_jitter_percent_gated(&contour, &tiers, 10.0).is_none());
     }
 }
