@@ -73,6 +73,7 @@ pub fn run_sz_exercise(_config: &AppConfig) -> Result<()> {
                         sz: None,
                         fatigue: None,
                     },
+                    conditions: None,
                 },
             };
             session.analysis.sz = Some(result);

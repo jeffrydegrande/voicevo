@@ -16,6 +16,15 @@ use crate::util;
 /// It loads each WAV file, runs the appropriate analysis pipeline, collects
 /// the results into a SessionData, and saves it as JSON.
 pub fn analyze_session(date: &str, app_config: &AppConfig) -> Result<SessionData> {
+    analyze_session_with_conditions(date, app_config, None)
+}
+
+/// Analyze all recordings for a given date with optional recording conditions.
+pub fn analyze_session_with_conditions(
+    date: &str,
+    app_config: &AppConfig,
+    conditions: Option<RecordingConditions>,
+) -> Result<SessionData> {
     let sustained_pitch = app_config.analysis.pitch_config_for("sustained");
     let scale_pitch = app_config.analysis.pitch_config_for("scale");
     let reading_pitch = app_config.analysis.pitch_config_for("reading");
@@ -97,6 +106,7 @@ pub fn analyze_session(date: &str, app_config: &AppConfig) -> Result<SessionData
             sz: None,
             fatigue: None,
         },
+        conditions,
     };
 
     // Save results

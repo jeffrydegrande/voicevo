@@ -45,6 +45,17 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
     )
     .context("Failed to initialize database schema")?;
 
+    // Migration: add conditions column if it doesn't exist
+    let has_conditions: bool = conn
+        .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'conditions'")
+        .and_then(|mut stmt| stmt.exists([]))
+        .unwrap_or(false);
+
+    if !has_conditions {
+        conn.execute_batch("ALTER TABLE sessions ADD COLUMN conditions TEXT;")
+            .context("Failed to add conditions column")?;
+    }
+
     Ok(())
 }
 
@@ -59,19 +70,28 @@ pub fn save_session_version(
     session: &SessionData,
     version: u32,
 ) -> Result<()> {
+    let conditions_json = session
+        .conditions
+        .as_ref()
+        .map(|c| serde_json::to_string(c))
+        .transpose()
+        .context("Failed to serialize conditions")?;
+
     // Upsert the session row
     conn.execute(
-        "INSERT INTO sessions (date, sustained_path, scale_path, reading_path)
-         VALUES (?1, ?2, ?3, ?4)
+        "INSERT INTO sessions (date, sustained_path, scale_path, reading_path, conditions)
+         VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(date) DO UPDATE SET
             sustained_path = COALESCE(?2, sustained_path),
             scale_path = COALESCE(?3, scale_path),
-            reading_path = COALESCE(?4, reading_path)",
+            reading_path = COALESCE(?4, reading_path),
+            conditions = COALESCE(?5, conditions)",
         rusqlite::params![
             session.date,
             session.recordings.sustained,
             session.recordings.scale,
             session.recordings.reading,
+            conditions_json,
         ],
     )
     .context("Failed to upsert session")?;
@@ -173,6 +193,25 @@ fn load_session_row(conn: &Connection, date: &str) -> Result<(i64, SessionRecord
     .with_context(|| format!("No session found for date: {date}"))
 }
 
+fn load_conditions(conn: &Connection, session_id: i64) -> Result<Option<RecordingConditions>> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT conditions FROM sessions WHERE id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+
+    match json {
+        Some(j) => {
+            let val = serde_json::from_str(&j).context("Failed to parse conditions")?;
+            Ok(Some(val))
+        }
+        None => Ok(None),
+    }
+}
+
 fn load_analysis(
     conn: &Connection,
     date: &str,
@@ -186,6 +225,8 @@ fn load_analysis(
     let sz = load_analysis_json::<SzAnalysis>(conn, session_id, version, "sz")?;
     let fatigue = load_analysis_json::<FatigueAnalysis>(conn, session_id, version, "fatigue")?;
 
+    let conditions = load_conditions(conn, session_id)?;
+
     Ok(SessionData {
         date: date.to_string(),
         recordings,
@@ -196,6 +237,7 @@ fn load_analysis(
             sz,
             fatigue,
         },
+        conditions,
     })
 }
 
@@ -363,6 +405,7 @@ mod tests {
                 sz: None,
                 fatigue: None,
             },
+            conditions: None,
         }
     }
 
@@ -521,5 +564,40 @@ mod tests {
         let loaded = load_session(&conn, "2026-01-15").unwrap();
         let s = loaded.analysis.sustained.unwrap();
         assert!((s.mpt_seconds - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn save_load_with_conditions() {
+        let conn = test_db();
+        let mut session = sample_session();
+        session.conditions = Some(RecordingConditions {
+            time_of_day: "morning".into(),
+            fatigue_level: 5,
+            throat_cleared: false,
+            mucus_level: "moderate".into(),
+            hydration: "normal".into(),
+            notes: Some("testing".into()),
+        });
+
+        save_session(&conn, &session).unwrap();
+        let loaded = load_session(&conn, "2026-01-15").unwrap();
+
+        let c = loaded.conditions.unwrap();
+        assert_eq!(c.time_of_day, "morning");
+        assert_eq!(c.fatigue_level, 5);
+        assert!(!c.throat_cleared);
+        assert_eq!(c.mucus_level, "moderate");
+        assert_eq!(c.hydration, "normal");
+        assert_eq!(c.notes.as_deref(), Some("testing"));
+    }
+
+    #[test]
+    fn load_session_without_conditions() {
+        let conn = test_db();
+        let session = sample_session(); // conditions: None
+
+        save_session(&conn, &session).unwrap();
+        let loaded = load_session(&conn, "2026-01-15").unwrap();
+        assert!(loaded.conditions.is_none());
     }
 }

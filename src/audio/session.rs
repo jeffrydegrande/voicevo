@@ -123,13 +123,18 @@ pub fn run_guided_session(date: &NaiveDate, config: &AppConfig) -> Result<()> {
     );
     println!();
 
+    // --- Conditions questionnaire ---
+    let mut terminal = crate::tui::init()?;
+    let conditions = crate::tui::screens::conditions::run(&mut terminal)?;
+    crate::tui::restore()?;
+
     // --- Analyze ---
     println!(
         "{}",
         style("=== Analyzing ===").bold()
     );
     println!();
-    analysis::analyzer::analyze_session(&date_str, config)?;
+    analysis::analyzer::analyze_session_with_conditions(&date_str, config, Some(conditions))?;
     println!();
 
     // --- Report ---
@@ -229,3 +234,4 @@ fn print_summary_row(name: &str, stats: &recorder::RecordingStats) {
         name, stats.duration_secs, stats.peak_db, stats.rms_db
     );
 }
+

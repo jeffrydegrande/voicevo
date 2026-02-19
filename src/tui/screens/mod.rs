@@ -1,3 +1,4 @@
+pub mod conditions;
 pub mod fatigue;
 pub mod recording;
 pub mod scale;

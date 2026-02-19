@@ -5,6 +5,25 @@ use serde::{Deserialize, Serialize};
 ///     CPPS, per-exercise pitch ceilings, reliability metadata.
 pub const ANALYSIS_VERSION: u32 = 2;
 
+/// Self-reported conditions at the time of recording.
+/// These help the LLM distinguish genuine recovery progress from day-to-day
+/// variation caused by fatigue, hydration, mucus, etc.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordingConditions {
+    /// "morning", "afternoon", or "evening"
+    pub time_of_day: String,
+    /// 0-10 scale (0 = none, 10 = extreme)
+    pub fatigue_level: u8,
+    /// Whether the patient cleared their throat before recording
+    pub throat_cleared: bool,
+    /// "low", "moderate", or "high"
+    pub mucus_level: String,
+    /// "low", "normal", or "high"
+    pub hydration: String,
+    /// Free-text for anything else
+    pub notes: Option<String>,
+}
+
 /// Complete session data for one recording date.
 ///
 /// The `#[derive(Serialize, Deserialize)]` macro auto-generates code
@@ -16,6 +35,9 @@ pub struct SessionData {
     pub date: String,
     pub recordings: SessionRecordings,
     pub analysis: SessionAnalysis,
+    /// Self-reported recording conditions. None for older sessions or CLI analyze.
+    #[serde(default)]
+    pub conditions: Option<RecordingConditions>,
 }
 
 /// Paths to the WAV files for each exercise.
@@ -261,6 +283,7 @@ mod tests {
                 sz: None,
                 fatigue: None,
             },
+            conditions: None,
         };
 
         // Serialize to JSON
@@ -316,5 +339,35 @@ mod tests {
         assert!(s.reliability.is_none());
         assert!(s.cpps_db.is_none());
         assert!(s.detection_quality.is_none());
+    }
+
+    #[test]
+    fn conditions_roundtrip() {
+        let conditions = RecordingConditions {
+            time_of_day: "morning".into(),
+            fatigue_level: 7,
+            throat_cleared: true,
+            mucus_level: "high".into(),
+            hydration: "low".into(),
+            notes: Some("slept poorly".into()),
+        };
+
+        let json = serde_json::to_string(&conditions).unwrap();
+        let loaded: RecordingConditions = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(loaded.time_of_day, "morning");
+        assert_eq!(loaded.fatigue_level, 7);
+        assert!(loaded.throat_cleared);
+        assert_eq!(loaded.mucus_level, "high");
+        assert_eq!(loaded.hydration, "low");
+        assert_eq!(loaded.notes.as_deref(), Some("slept poorly"));
+    }
+
+    #[test]
+    fn conditions_backward_compat() {
+        // Old JSON without conditions field should deserialize to None
+        let json = r#"{"date":"2026-01-01","recordings":{"sustained":null,"scale":null,"reading":null},"analysis":{"sustained":null,"scale":null,"reading":null}}"#;
+        let s: SessionData = serde_json::from_str(json).unwrap();
+        assert!(s.conditions.is_none());
     }
 }

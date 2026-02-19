@@ -64,6 +64,7 @@ mod tests {
                 sz: None,
                 fatigue: None,
             },
+            conditions: None,
         }
     }
 

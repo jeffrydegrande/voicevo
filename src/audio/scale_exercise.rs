@@ -94,6 +94,7 @@ pub fn run_scale_exercise(config: &AppConfig) -> Result<()> {
                         sz: None,
                         fatigue: None,
                     },
+                    conditions: None,
                 }
             });
             session.analysis.scale = Some(result);

@@ -89,6 +89,17 @@ Interpret the data concisely. Use plain language — the patient is not a clinic
 3. **End with the central question: is the voice improving over time?** Compare trends across sessions — pitch stability, HNR, MPT, voice breaks, range. Be honest about the direction. If things are improving, say so clearly. If they're stagnating or regressing, say that too — the patient wants truth, not comfort.
    - If no historical data is available, say so and explain that tracking trends requires multiple sessions.
 
+## Recording conditions
+
+Sessions may include self-reported recording conditions (time of day, fatigue, hydration, mucus, whether the throat was cleared). These significantly affect voice quality:
+- Morning voice is typically rougher (vocal folds are dehydrated and stiff from sleep)
+- High fatigue reduces vocal endurance and increases jitter/shimmer
+- High mucus can dampen vibration but also add mass (lowers pitch)
+- Low hydration increases friction and reduces phonation time
+- Clearing the throat before recording can temporarily improve clarity
+
+When conditions are available, factor them into your interpretation. For example, worse metrics on a high-fatigue morning session may not indicate regression — compare against sessions with similar conditions when possible.
+
 Keep it to 2-3 short paragraphs. Don't repeat the raw numbers back — the patient already sees them in the terminal output."#
         .to_string()
 }
@@ -101,6 +112,19 @@ pub fn user_prompt(current: &SessionData, history: &[SessionData], trend_report:
 
     parts.push(format!("## Current session: {}", current.date));
     parts.push(String::new());
+
+    if let Some(c) = &current.conditions {
+        parts.push("### Recording conditions".into());
+        parts.push(format!("- Time of day: {}", c.time_of_day));
+        parts.push(format!("- Fatigue: {}/10", c.fatigue_level));
+        parts.push(format!("- Throat cleared: {}", if c.throat_cleared { "yes" } else { "no" }));
+        parts.push(format!("- Mucus level: {}", c.mucus_level));
+        parts.push(format!("- Hydration: {}", c.hydration));
+        if let Some(ref notes) = c.notes {
+            parts.push(format!("- Notes: {notes}"));
+        }
+        parts.push(String::new());
+    }
 
     if let Some(s) = &current.analysis.sustained {
         parts.push("### Sustained vowel".into());
@@ -188,6 +212,19 @@ pub fn user_prompt(current: &SessionData, history: &[SessionData], trend_report:
 
         for session in history {
             parts.push(format!("### {}", session.date));
+
+            if let Some(c) = &session.conditions {
+                let mut cond_parts = vec![
+                    c.time_of_day.clone(),
+                    format!("fatigue={}", c.fatigue_level),
+                    format!("mucus={}", c.mucus_level),
+                    format!("hydration={}", c.hydration),
+                ];
+                if c.throat_cleared {
+                    cond_parts.push("throat_cleared".into());
+                }
+                parts.push(format!("  Conditions: {}", cond_parts.join(", ")));
+            }
 
             if let Some(s) = &session.analysis.sustained {
                 let quality_tag = quality_tag(s.reliability.as_ref(), s.detection_quality.as_deref());
@@ -373,6 +410,7 @@ mod tests {
                 sz: None,
                 fatigue: None,
             },
+            conditions: None,
         }
     }
 
@@ -447,5 +485,58 @@ mod tests {
         assert!(prompt.contains("GPT says something else"));
         assert!(prompt.contains("Interpretation A"));
         assert!(prompt.contains("Interpretation B"));
+    }
+
+    #[test]
+    fn user_prompt_includes_conditions_when_present() {
+        let mut session = sample_session("2026-02-15");
+        session.conditions = Some(RecordingConditions {
+            time_of_day: "morning".into(),
+            fatigue_level: 7,
+            throat_cleared: true,
+            mucus_level: "high".into(),
+            hydration: "low".into(),
+            notes: Some("bad night".into()),
+        });
+        let prompt = user_prompt(&session, &[], None);
+        assert!(prompt.contains("### Recording conditions"));
+        assert!(prompt.contains("Time of day: morning"));
+        assert!(prompt.contains("Fatigue: 7/10"));
+        assert!(prompt.contains("Throat cleared: yes"));
+        assert!(prompt.contains("Mucus level: high"));
+        assert!(prompt.contains("Hydration: low"));
+        assert!(prompt.contains("Notes: bad night"));
+    }
+
+    #[test]
+    fn user_prompt_omits_conditions_when_none() {
+        let session = sample_session("2026-02-15");
+        let prompt = user_prompt(&session, &[], None);
+        assert!(!prompt.contains("Recording conditions"));
+    }
+
+    #[test]
+    fn user_prompt_history_includes_conditions() {
+        let current = sample_session("2026-02-22");
+        let mut past = sample_session("2026-02-15");
+        past.conditions = Some(RecordingConditions {
+            time_of_day: "evening".into(),
+            fatigue_level: 3,
+            throat_cleared: false,
+            mucus_level: "low".into(),
+            hydration: "high".into(),
+            notes: None,
+        });
+        let prompt = user_prompt(&current, &[past], None);
+        assert!(prompt.contains("Conditions: evening, fatigue=3, mucus=low, hydration=high"));
+        assert!(!prompt.contains("throat_cleared"));
+    }
+
+    #[test]
+    fn system_prompt_mentions_conditions() {
+        let prompt = system_prompt();
+        assert!(prompt.contains("Recording conditions"));
+        assert!(prompt.contains("fatigue"));
+        assert!(prompt.contains("hydration"));
     }
 }

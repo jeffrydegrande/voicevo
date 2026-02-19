@@ -124,6 +124,7 @@ pub fn run_fatigue_exercise(_config: &AppConfig) -> Result<()> {
                         sz: None,
                         fatigue: None,
                     },
+                    conditions: None,
                 },
             };
             session.analysis.fatigue = Some(result);
