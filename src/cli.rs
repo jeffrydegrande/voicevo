@@ -135,6 +135,9 @@ pub enum ExerciseCommand {
 
     /// Fatigue slope: 5 sustained trials to measure vocal endurance
     Fatigue,
+
+    /// Chromatic scale with live pitch feedback
+    Scale,
 }
 
 #[derive(Subcommand)]

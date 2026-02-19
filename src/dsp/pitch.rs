@@ -312,6 +312,52 @@ pub fn extract_pitch_contour(
     contour
 }
 
+/// Detect pitch from a single audio frame.
+///
+/// Runs McLeod on the provided samples using default config tuned for
+/// real-time display (80 Hz floor). Returns the detected frequency in Hz,
+/// or None if no pitch was found.
+pub fn detect_pitch_frame(samples: &[f32], sample_rate: u32) -> Option<f32> {
+    let size = samples.len();
+    let padding = size / 2;
+    let windowed = windowing::hanning(samples);
+    let padded: Vec<f64> = windowed.iter().map(|&s| s as f64).collect();
+
+    let mut detector = McLeodDetector::new(size, padding);
+    let pitch = detector.get_pitch(
+        &padded,
+        sample_rate as usize,
+        0.2,  // power threshold
+        0.2,  // clarity threshold
+    );
+
+    pitch
+        .map(|p| p.frequency as f32)
+        .filter(|&f| f >= 50.0 && f <= 1000.0)
+}
+
+/// Map a frequency to the nearest note name, octave, and cents deviation.
+///
+/// Returns (note_name, octave, cents_offset) where cents_offset is negative
+/// for flat and positive for sharp relative to the nearest semitone.
+pub fn freq_to_note(freq_hz: f32) -> (&'static str, i32, f32) {
+    const NOTE_NAMES: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+
+    // Semitones from A4 (440 Hz)
+    let semitones_from_a4 = 12.0 * (freq_hz / 440.0).log2();
+    let nearest_semitone = semitones_from_a4.round() as i32;
+    let cents = (semitones_from_a4 - nearest_semitone as f32) * 100.0;
+
+    // A4 is MIDI note 69 → note index 9 in octave 4
+    let midi = 69 + nearest_semitone;
+    let note_index = ((midi % 12) + 12) % 12; // handle negatives
+    let octave = (midi / 12) - 1;
+
+    (NOTE_NAMES[note_index as usize], octave, cents)
+}
+
 /// Extract only the voiced frequencies from a pitch contour.
 /// Useful for computing statistics where you only care about frames
 /// where pitch was actually detected.
@@ -488,5 +534,58 @@ mod tests {
             result.used_energy_fallback,
             "Silence should trigger energy fallback"
         );
+    }
+
+    #[test]
+    fn detect_pitch_frame_sine() {
+        let samples = sine_wave(220.0, 44100, 0.1);
+        let hz = detect_pitch_frame(&samples[..2048], 44100);
+        assert!(hz.is_some(), "Should detect pitch from a sine frame");
+        let freq = hz.unwrap();
+        assert!(
+            (freq - 220.0).abs() < 10.0,
+            "Expected ~220 Hz, got {freq:.1} Hz"
+        );
+    }
+
+    #[test]
+    fn detect_pitch_frame_silence() {
+        let samples = vec![0.0; 2048];
+        assert!(detect_pitch_frame(&samples, 44100).is_none());
+    }
+
+    #[test]
+    fn freq_to_note_a4() {
+        let (note, octave, cents) = freq_to_note(440.0);
+        assert_eq!(note, "A");
+        assert_eq!(octave, 4);
+        assert!(cents.abs() < 1.0, "440 Hz should be in tune, got {cents:.1} cents");
+    }
+
+    #[test]
+    fn freq_to_note_c4() {
+        // C4 = 261.63 Hz
+        let (note, octave, cents) = freq_to_note(261.63);
+        assert_eq!(note, "C");
+        assert_eq!(octave, 4);
+        assert!(cents.abs() < 2.0);
+    }
+
+    #[test]
+    fn freq_to_note_sharp() {
+        // Slightly above A4 — should be A4 with positive cents
+        let (note, octave, cents) = freq_to_note(445.0);
+        assert_eq!(note, "A");
+        assert_eq!(octave, 4);
+        assert!(cents > 0.0, "445 Hz should be sharp");
+    }
+
+    #[test]
+    fn freq_to_note_flat() {
+        // Slightly below A4 — should be A4 with negative cents
+        let (note, octave, cents) = freq_to_note(435.0);
+        assert_eq!(note, "A");
+        assert_eq!(octave, 4);
+        assert!(cents < 0.0, "435 Hz should be flat");
     }
 }

@@ -7,6 +7,7 @@ mod llm;
 mod paths;
 mod report;
 mod storage;
+mod tui;
 mod util;
 
 use anyhow::{Context, Result};
@@ -258,6 +259,7 @@ fn main() -> Result<()> {
             ExerciseCommand::Sustain => audio::exercise::run_sustain_exercise(&app_config),
             ExerciseCommand::Sz => audio::sz_exercise::run_sz_exercise(&app_config),
             ExerciseCommand::Fatigue => audio::fatigue_exercise::run_fatigue_exercise(&app_config),
+            ExerciseCommand::Scale => audio::scale_exercise::run_scale_exercise(&app_config),
         },
 
         Command::Discard { exercise, date } => {
